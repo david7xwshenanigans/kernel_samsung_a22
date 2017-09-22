@@ -4146,7 +4146,7 @@ void mmc_blk_issue_rq(struct mmc_queue *mq, struct request *req)
 		/* non-cq: claim host only for the first request
 		 * cq: claim host for per request
 		 */
-		mmc_get_card(card);
+		mmc_get_card(card, NULL);
 
 	ret = mmc_blk_part_switch(card, md->part_type);
 	if (ret) {
@@ -4251,11 +4251,11 @@ out:
 	 */
 	if (part_cmdq_en) {
 		if (put_card)
-			mmc_put_card(card);
+			mmc_put_card(card, NULL);
 	} else
 #endif
 		if (!atomic_read(&mq->qcnt))
-			mmc_put_card(card);
+			mmc_put_card(card, NULL);
 }
 
 static inline int mmc_blk_readonly(struct mmc_card *card)

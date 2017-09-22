@@ -163,10 +163,11 @@ int mmc_set_blocklen(struct mmc_card *card, unsigned int blocklen);
 int mmc_set_blockcount(struct mmc_card *card, unsigned int blockcount,
 			bool is_rel_write);
 
-int __mmc_claim_host(struct mmc_host *host, atomic_t *abort);
+int __mmc_claim_host(struct mmc_host *host, struct mmc_ctx *ctx,
+		     atomic_t *abort);
 void mmc_release_host(struct mmc_host *host);
-void mmc_get_card(struct mmc_card *card);
-void mmc_put_card(struct mmc_card *card);
+void mmc_get_card(struct mmc_card *card, struct mmc_ctx *ctx);
+void mmc_put_card(struct mmc_card *card, struct mmc_ctx *ctx);
 int mmc_try_claim_host(struct mmc_host *host, unsigned int delay);
 
 #if defined(CONFIG_MMC_FFU)
@@ -185,7 +186,7 @@ extern int mmc_blk_cmdq_switch(struct mmc_card *card, int enable);
  */
 static inline void mmc_claim_host(struct mmc_host *host)
 {
-	__mmc_claim_host(host, NULL);
+	__mmc_claim_host(host, NULL, NULL);
 }
 
 #endif
