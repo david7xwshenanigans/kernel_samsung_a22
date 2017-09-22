@@ -457,6 +457,29 @@ void mmc_cmdq_setup_queue(struct mmc_queue *mq, struct mmc_card *card)
 }
 #endif
 
+static void mmc_setup_queue(struct mmc_queue *mq, struct mmc_card *card)
+{
+	struct mmc_host *host = card->host;
+	u64 limit = BLK_BOUNCE_HIGH;
+
+	if (mmc_dev(host)->dma_mask && *mmc_dev(host)->dma_mask)
+		limit = (u64)dma_max_pfn(mmc_dev(host)) << PAGE_SHIFT;
+
+	queue_flag_set_unlocked(QUEUE_FLAG_NONROT, mq->queue);
+	queue_flag_clear_unlocked(QUEUE_FLAG_ADD_RANDOM, mq->queue);
+	if (mmc_can_erase(card))
+		mmc_queue_setup_discard(mq->queue, card);
+
+	blk_queue_bounce_limit(mq->queue, limit);
+	blk_queue_max_hw_sectors(mq->queue,
+		min(host->max_blk_count, host->max_req_size / 512));
+	blk_queue_max_segments(mq->queue, host->max_segs);
+	blk_queue_max_segment_size(mq->queue, host->max_seg_size);
+
+	/* Initialize thread_sem even if it is not used */
+	sema_init(&mq->thread_sem, 1);
+}
+
 /**
  * mmc_init_queue - initialise a queue structure.
  * @mq: mmc queue
@@ -470,14 +493,10 @@ int mmc_init_queue(struct mmc_queue *mq, struct mmc_card *card,
 		   spinlock_t *lock, const char *subname, int area_type)
 {
 	struct mmc_host *host = card->host;
-	u64 limit = BLK_BOUNCE_HIGH;
 	int ret = -ENOMEM;
 #ifdef CONFIG_MTK_EMMC_CQ_SUPPORT
 	int i;
 #endif
-
-	if (mmc_dev(host)->dma_mask && *mmc_dev(host)->dma_mask)
-		limit = (u64)dma_max_pfn(mmc_dev(host)) << PAGE_SHIFT;
 
 	mq->card = card;
 
@@ -584,20 +603,12 @@ int mmc_init_queue(struct mmc_queue *mq, struct mmc_card *card,
 #endif
 
 	blk_queue_prep_rq(mq->queue, mmc_prep_request);
-	queue_flag_set_unlocked(QUEUE_FLAG_NONROT, mq->queue);
-	queue_flag_clear_unlocked(QUEUE_FLAG_ADD_RANDOM, mq->queue);
-	if (mmc_can_erase(card))
-		mmc_queue_setup_discard(mq->queue, card);
 
 #ifdef CONFIG_MTK_EMMC_CQ_SUPPORT
 	blk_queue_softirq_done(mq->queue, mmc_queue_softirq_done);
 #endif
 
-	blk_queue_bounce_limit(mq->queue, limit);
-	blk_queue_max_hw_sectors(mq->queue,
-		min(host->max_blk_count, host->max_req_size / 512));
-	blk_queue_max_segments(mq->queue, host->max_segs);
-	blk_queue_max_segment_size(mq->queue, host->max_seg_size);
+	mmc_setup_queue(mq, card);
 
 #ifdef CONFIG_MTK_EMMC_CQ_SUPPORT
 	if (mmc_card_mmc(card)) {
@@ -609,8 +620,6 @@ int mmc_init_queue(struct mmc_queue *mq, struct mmc_card *card,
 		}
 	}
 #endif
-
-	sema_init(&mq->thread_sem, 1);
 
 	/* sw-cqhci inline crypto */
 	mmc_crypto_setup_queue(host, mq->queue);
