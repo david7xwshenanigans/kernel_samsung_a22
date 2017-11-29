@@ -916,13 +916,6 @@ out:
 EXPORT_SYMBOL(mmc_blk_cmdq_switch);
 #endif
 
-#ifdef CONFIG_MMC_MQ_DEFAULT
-bool mmc_use_blk_mq = true;
-#else
-bool mmc_use_blk_mq = false;
-#endif
-module_param_named(use_blk_mq, mmc_use_blk_mq, bool, S_IWUSR | S_IRUGO);
-
 static int mmc_schedule_delayed_work(struct delayed_work *work,
 				     unsigned long delay)
 {
