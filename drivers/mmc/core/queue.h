@@ -18,6 +18,18 @@ static inline bool mmc_req_is_special(struct request *req)
 }
 #endif
 
+enum mmc_issued {
+	MMC_REQ_STARTED,
+	MMC_REQ_BUSY,
+	MMC_REQ_FAILED_TO_START,
+	MMC_REQ_FINISHED,
+};
+
+enum mmc_issue_type {
+	MMC_ISSUE_SYNC,
+	MMC_ISSUE_ASYNC,
+	MMC_ISSUE_MAX,
+};
 static inline struct mmc_queue_req *req_to_mmc_queue_req(struct request *rq)
 {
 	return blk_mq_rq_to_pdu(rq);
@@ -82,6 +94,7 @@ struct mmc_queue_req {
 #ifdef CONFIG_MTK_EMMC_HW_CQ
 	struct mmc_cmdq_req	cmdq_req;
 #endif
+	int			retries;
 };
 
 struct mmc_queue {
@@ -91,7 +104,9 @@ struct mmc_queue {
 #ifdef CONFIG_MTK_EMMC_HW_CQ
 	unsigned long	flags;
 #define MMC_QUEUE_SUSPENDED	(1 << 0)
-#else
+#endif
+	struct mmc_ctx		ctx;
+	struct blk_mq_tag_set	tag_set;
 	bool			suspended;
 #endif
 	bool			asleep;
@@ -122,6 +137,14 @@ struct mmc_queue {
 	void (*cmdq_error_fn)(struct mmc_queue *mq);
 	enum blk_eh_timer_return (*cmdq_req_timed_out)(struct request *req);
 #endif
+
+	int			in_flight[MMC_ISSUE_MAX];
+	bool			rw_wait;
+	bool			waiting;
+	wait_queue_head_t	wait;
+	struct request		*complete_req;
+	struct mutex		complete_lock;
+	struct work_struct	complete_work;
 };
 
 #if defined(CONFIG_MTK_EMMC_CQ_SUPPORT) || defined(CONFIG_MTK_EMMC_HW_CQ)
@@ -144,6 +167,14 @@ extern unsigned int mmc_cmdq_queue_map_sg(struct mmc_queue *mq,
 #endif
 extern unsigned int mmc_queue_map_sg(struct mmc_queue *,
 				     struct mmc_queue_req *);
+
+enum mmc_issue_type mmc_issue_type(struct mmc_queue *mq, struct request *req);
+
+static inline int mmc_tot_in_flight(struct mmc_queue *mq)
+{
+	return mq->in_flight[MMC_ISSUE_SYNC] +
+	       mq->in_flight[MMC_ISSUE_ASYNC];
+}
 
 #ifdef CONFIG_MTK_EMMC_CQ_SUPPORT
 extern void mmc_wait_cmdq_empty(struct mmc_host *host);
