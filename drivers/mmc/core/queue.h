@@ -28,6 +28,7 @@ enum mmc_issued {
 enum mmc_issue_type {
 	MMC_ISSUE_SYNC,
 	MMC_ISSUE_ASYNC,
+	MMC_ISSUE_DCMD,
 	MMC_ISSUE_MAX,
 };
 static inline struct mmc_queue_req *req_to_mmc_queue_req(struct request *rq)
@@ -42,7 +43,6 @@ static inline struct request *mmc_queue_req_to_req(struct mmc_queue_req *mqr)
 	return blk_mq_rq_from_pdu(mqr);
 }
 
-struct task_struct;
 struct mmc_blk_data;
 struct mmc_blk_ioc_data;
 
@@ -58,7 +58,6 @@ struct mmc_blk_request {
 	struct mmc_command	cmd;
 	struct mmc_command	stop;
 	struct mmc_data		data;
-	int			retune_retry_done;
 };
 
 /**
@@ -80,10 +79,10 @@ enum mmc_drv_op {
 struct mmc_queue_req {
 #if defined(CONFIG_MTK_EMMC_CQ_SUPPORT) || defined(CONFIG_MTK_EMMC_HW_CQ)
 	struct request		*req;
+	struct mmc_async_req	areq;
 #endif
 	struct mmc_blk_request	brq;
 	struct scatterlist	*sg;
-	struct mmc_async_req	areq;
 	enum mmc_drv_op		drv_op;
 	int			drv_op_result;
 	void			*drv_op_data;
@@ -99,29 +98,22 @@ struct mmc_queue_req {
 
 struct mmc_queue {
 	struct mmc_card		*card;
+#if defined(CONFIG_MTK_EMMC_CQ_SUPPORT) || defined(CONFIG_MTK_EMMC_HW_CQ)
 	struct task_struct	*thread;
 	struct semaphore	thread_sem;
+#endif
 #ifdef CONFIG_MTK_EMMC_HW_CQ
 	unsigned long	flags;
 #define MMC_QUEUE_SUSPENDED	(1 << 0)
 #endif
 	struct mmc_ctx		ctx;
 	struct blk_mq_tag_set	tag_set;
-	bool			suspended;
-#endif
-	bool			asleep;
 	struct mmc_blk_data	*blkdata;
 	struct request_queue	*queue;
 #ifdef CONFIG_MTK_EMMC_CQ_SUPPORT
 	struct mmc_queue_req	mqrq[EMMC_MAX_QUEUE_DEPTH];
-#endif
-	/*
-	 * FIXME: this counter is not a very reliable way of keeping
-	 * track of how many requests that are ongoing. Switch to just
-	 * letting the block core keep track of requests and per-request
-	 * associated mmc_queue_req data.
-	 */
 	atomic_t		qcnt;
+#endif
 #ifdef CONFIG_MTK_EMMC_HW_CQ
 	struct mmc_queue_req	*mqrq_cmdq;
 	struct work_struct	cmdq_err_work;
@@ -139,6 +131,9 @@ struct mmc_queue {
 #endif
 
 	int			in_flight[MMC_ISSUE_MAX];
+	u32			cqe_busy;
+#define MMC_CQE_DCMD_BUSY	BIT(0)
+#define MMC_CQE_QUEUE_FULL	BIT(1)
 	bool			rw_wait;
 	bool			use_cqe;
 	bool			in_recovery;
@@ -176,7 +171,8 @@ enum mmc_issue_type mmc_issue_type(struct mmc_queue *mq, struct request *req);
 static inline int mmc_tot_in_flight(struct mmc_queue *mq)
 {
 	return mq->in_flight[MMC_ISSUE_SYNC] +
-	       mq->in_flight[MMC_ISSUE_ASYNC];
+	       mq->in_flight[MMC_ISSUE_ASYNC] +
+	       mq->in_flight[MMC_ISSUE_DCMD];
 }
 
 #ifdef CONFIG_MTK_EMMC_CQ_SUPPORT

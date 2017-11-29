@@ -318,8 +318,8 @@ static void sugov_get_util(unsigned long *util, unsigned long *max, int cpu)
 	*max = max_cap;
 }
 
-static void sugov_set_iowait_boost(struct sugov_cpu *sg_cpu, u64 time,
-				   unsigned int flags)
+static void sugov_iowait_boost(struct sugov_cpu *sg_cpu, u64 time,
+			       unsigned int flags)
 {
 	unsigned int max_boost;
 
@@ -331,9 +331,6 @@ static void sugov_set_iowait_boost(struct sugov_cpu *sg_cpu, u64 time,
 #endif
 
 	if (flags & SCHED_CPUFREQ_IOWAIT) {
-		if (sg_cpu->iowait_boost_pending)
-			return;
-
 		sg_cpu->iowait_boost_pending = true;
 
 		/*
@@ -342,24 +339,22 @@ static void sugov_set_iowait_boost(struct sugov_cpu *sg_cpu, u64 time,
 		 * Since DL tasks have a much more advanced bandwidth control,
 		 * it's safe to assume that IO boost does not apply to
 		 * those tasks.
-		 * Instead, since RT tasks are currently not utiliation clamped,
+		 * Instead, since RT tasks are currently not utilization clamped,
 		 * we don't want to apply clamping on IO boost while there is
 		 * blocked RT utilization.
 		 */
 		max_boost = sg_cpu->iowait_boost_max;
 		max_boost = uclamp_util(cpu_rq(sg_cpu->cpu), max_boost);
 
-		if (sg_cpu->iowait_boost) {
-			sg_cpu->iowait_boost <<= 1;
-			if (sg_cpu->iowait_boost > max_boost)
-				sg_cpu->iowait_boost = max_boost;
-		} else {
-			sg_cpu->iowait_boost = sg_cpu->min_boost;
-		}
+		sg_cpu->iowait_boost = max(sg_cpu->iowait_boost << 1,
+					   sg_cpu->min_boost);
+
+		if (sg_cpu->iowait_boost > max_boost)
+			sg_cpu->iowait_boost = max_boost;
 	} else if (sg_cpu->iowait_boost) {
 		s64 delta_ns = time - sg_cpu->last_update;
 
-		/* Clear iowait_boost if the CPU apprears to have been idle. */
+		/* Clear iowait_boost if the CPU appears to have been idle. */
 		if (delta_ns > TICK_NSEC) {
 			sg_cpu->iowait_boost = 0;
 			sg_cpu->iowait_boost_pending = false;
@@ -367,11 +362,12 @@ static void sugov_set_iowait_boost(struct sugov_cpu *sg_cpu, u64 time,
 	}
 }
 
-static void sugov_iowait_boost(struct sugov_cpu *sg_cpu, unsigned long *util,
-			       unsigned long *max)
+static void sugov_iowait_apply(struct sugov_cpu *sg_cpu, u64 time,
+			       unsigned long *util, unsigned long *max)
 {
 	unsigned int boost_util, boost_max;
 
+	/* No iowait boost if there are no pending requests */
 	if (!sg_cpu->iowait_boost)
 		return;
 
@@ -423,7 +419,7 @@ static void sugov_update_single(struct update_util_data *hook, u64 time,
 	int cid;
 #endif
 
-	sugov_set_iowait_boost(sg_cpu, time, flags);
+	sugov_iowait_boost(sg_cpu, time, flags);
 	sg_cpu->last_update = time;
 
 	if (!sugov_should_update_freq(sg_policy, time))
@@ -436,7 +432,7 @@ static void sugov_update_single(struct update_util_data *hook, u64 time,
 	} else {
 		sugov_get_util(&util, &max, sg_cpu->cpu);
 		util = uclamp_util(cpu_rq(sg_cpu->cpu), util);
-		sugov_iowait_boost(sg_cpu, &util, &max);
+		sugov_iowait_apply(sg_cpu, time, &util, &max);
 		next_f = get_next_freq(sg_policy, util, max);
 #ifdef CONFIG_MTK_TINYSYS_SSPM_SUPPORT
 		next_f = clamp_val(next_f, policy->min, policy->max);
@@ -506,7 +502,7 @@ static unsigned int sugov_next_freq_shared(struct sugov_cpu *sg_cpu, u64 time)
 			max = j_max;
 		}
 
-		sugov_iowait_boost(j_sg_cpu, &util, &max);
+		sugov_iowait_apply(j_sg_cpu, time, &util, &max);
 	}
 
 	next_f = get_next_freq(sg_policy, util, max);
@@ -535,7 +531,7 @@ static void sugov_update_shared(struct update_util_data *hook, u64 time,
 	sg_cpu->max = max;
 	sg_cpu->flags = flags;
 
-	sugov_set_iowait_boost(sg_cpu, time, flags);
+	sugov_iowait_boost(sg_cpu, time, flags);
 	sg_cpu->last_update = time;
 
 	if (sugov_should_update_freq(sg_policy, time)) {

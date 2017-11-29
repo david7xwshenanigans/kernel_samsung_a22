@@ -11,7 +11,6 @@
 struct mmc_queue;
 struct request;
 
-void mmc_blk_issue_rq(struct mmc_queue *mq, struct request *req);
 void mmc_error_count_log(struct mmc_card *card, int index, int error, u32 status);
 
 enum mmc_issued;
