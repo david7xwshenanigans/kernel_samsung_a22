@@ -108,6 +108,26 @@ static struct request *mmc_peek_request(struct mmc_queue *mq)
 	return mq->cmdq_req_peeked;
 }
 
+static void mmc_mq_recovery_handler(struct work_struct *work)
+{
+	struct mmc_queue *mq = container_of(work, struct mmc_queue,
+					    recovery_work);
+
+	mmc_get_card(mq->card, &mq->ctx);
+
+	mq->in_recovery = true;
+
+	if (mq->use_cqe)
+		mmc_blk_cqe_recovery(mq);
+	else
+		mmc_blk_mq_recovery(mq);
+
+	mq->in_recovery = false;
+
+	mmc_put_card(mq->card, &mq->ctx);
+
+	blk_mq_unquiesce_queue(mq->queue);
+}
 static bool mmc_check_blk_queue_start_tag(struct request_queue *q,
 	struct request *req)
 {
@@ -595,6 +615,7 @@ static void mmc_setup_queue(struct mmc_queue *mq, struct mmc_card *card)
 	sema_init(&mq->thread_sem, 1);
 
 	INIT_WORK(&mq->complete_work, mmc_blk_mq_complete_work);
+	INIT_WORK(&mq->recovery_work, mmc_mq_recovery_handler);
 
 	mutex_init(&mq->complete_lock);
 

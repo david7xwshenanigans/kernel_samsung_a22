@@ -140,8 +140,11 @@ struct mmc_queue {
 
 	int			in_flight[MMC_ISSUE_MAX];
 	bool			rw_wait;
-	bool			waiting;
+	bool			use_cqe;
+	bool			in_recovery;
+	struct work_struct	recovery_work;
 	wait_queue_head_t	wait;
+	struct request		*recovery_req;
 	struct request		*complete_req;
 	struct mutex		complete_lock;
 	struct work_struct	complete_work;
