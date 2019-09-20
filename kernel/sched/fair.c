@@ -6716,13 +6716,8 @@ static void dump_eenv_debug(struct energy_env *eenv)
 	char cpu_utils[(NR_CPUS*12)+10]="cpu_util: ";
 	char cpulist[64];
 
-	trace_printk("eenv scenario: task=%p %s task_util=%lu prev_cpu=%d",
-			eenv->p, eenv->p->comm, eenv->util_delta, eenv->cpu[EAS_CPU_PRV].cpu_id);
-
-	for (cpu_idx=EAS_CPU_PRV; cpu_idx < eenv->max_cpu_count; cpu_idx++) {
-		if (eenv->cpu[cpu_idx].cpu_id == -1)
-			continue;
-		trace_printk("---Scenario %d: Place task on cpu %d energy=%lu (%d debug logs at %p)",
+trace_printk("eenv scenario: task=%s task_util=%lu prev_cpu=%d",
+eenv->p->comm, eenv->util_delta, eenv->cpu[EAS_CPU_PRV].cpu_id);
 				cpu_idx+1, eenv->cpu[cpu_idx].cpu_id,
 				eenv->cpu[cpu_idx].energy >> SCHED_CAPACITY_SHIFT,
 				eenv->cpu[cpu_idx].debug_idx,
@@ -6808,23 +6803,19 @@ static inline int select_energy_cpu_idx(struct energy_env *eenv)
 	for (cpu_idx = EAS_CPU_PRV; cpu_idx < eenv->max_cpu_count; ++cpu_idx) {
 		int cpu = eenv->cpu[cpu_idx].cpu_id;
 
-		if (cpu < 0 || cpu_isolated(cpu))
-			continue;
-		cpumask_set_cpu(cpu, &eenv->cpus_mask);
-	}
+/*
+ * If the task is and was blocked, we don't have to re-compute the
+ * energy delta if the EAS CPU hasn't changed.
+ */
+if (!eenv->p->on_rq && eenv->cpu[EAS_CPU_PRV].cpu_id == eenv->p->recent_used_cpu)
+return EAS_CPU_PRV;
 
-	mtk_update_new_capacity(eenv);
+cpumask_clear(&eenv->cpus_mask);
+for (cpu_idx = EAS_CPU_PRV; cpu_idx < eenv->max_cpu_count; ++cpu_idx) {
+int cpu = eenv->cpu[cpu_idx].cpu_id;
 
-	sg = sd->groups;
-	do {
-		/* Skip SGs which do not contains a candidate CPU */
-		if (!cpumask_intersects(&eenv->cpus_mask, sched_group_span(sg)))
-			continue;
-
-		eenv->sg_top = sg;
-		if (compute_energy(eenv) == -EINVAL)
-			return EAS_CPU_PRV;
-	} while (sg = sg->next, sg != sd->groups);
+if (cpu < 0 || cpu_isolated(cpu))
+continue;
 	/* remember - eenv energy values are unscaled */
 
 	/*
@@ -8401,6 +8392,7 @@ static int find_energy_efficient_cpu(struct sched_domain *sd,
 
 		}
 
+<<<<<<< HEAD
 		/* Place target into NEXT slot */
 		eenv->cpu[EAS_CPU_NXT].cpu_id = target_cpu;
 
@@ -8412,6 +8404,27 @@ static int find_energy_efficient_cpu(struct sched_domain *sd,
 		/* take note if no target was found */
 		 if (eenv->cpu[EAS_CPU_NXT].cpu_id < 0)
 			 eenv->max_cpu_count = EAS_CPU_NXT;
+||||||| parent of 4892f51ad54d (sched/fair: Avoid redundant EAS calculation)
+		/* Evaluate the energy impact of using this CPU. */
+		if (max_spare_cap_cpu >= 0) {
+			cur_delta = compute_energy(p, max_spare_cap_cpu, pd);
+			cur_delta -= base_energy_pd;
+			if (cur_delta < best_delta) {
+				best_delta = cur_delta;
+				best_energy_cpu = max_spare_cap_cpu;
+			}
+		}
+=======
+		/* Evaluate the energy impact of using this CPU. */
+		if (max_spare_cap_cpu >= 0 && max_spare_cap_cpu != prev_cpu) {
+			cur_delta = compute_energy(p, max_spare_cap_cpu, pd);
+			cur_delta -= base_energy_pd;
+			if (cur_delta < best_delta) {
+				best_delta = cur_delta;
+				best_energy_cpu = max_spare_cap_cpu;
+			}
+		}
+>>>>>>> 4892f51ad54d (sched/fair: Avoid redundant EAS calculation)
 	}
 
 	if (eenv->max_cpu_count == EAS_CPU_NXT) {
