@@ -3031,20 +3031,6 @@ static u32 __accumulate_pelt_segments(u64 periods, u32 d1, u32 d3)
 
 	return c1 + c2 + c3;
 }
-
-#define cap_scale(v, s) ((v)*(s) >> SCHED_CAPACITY_SHIFT)
-
-/*
- * Accumulate the three separate parts of the sum; d1 the remainder
- * of the last (incomplete) period, d2 the span of full periods and d3
- * the remainder of the (incomplete) current period.
- *
- *           d1          d2           d3
- *           ^           ^            ^
- *           |           |            |
- *         |<->|<----------------->|<--->|
- * ... |---x---|------| ... |------|-----x (now)
- *
  *                           p-1
  * u' = (u + d1) y^p + 1024 \Sum y^n + d3 y^0
  *                           n=1
@@ -12418,16 +12404,28 @@ static void propagate_entity_cfs_rq(struct sched_entity *se)
 {
 	struct cfs_rq *cfs_rq;
 
+	list_add_leaf_cfs_rq(cfs_rq_of(se));
+
 	/* Start to propagate at parent */
 	se = se->parent;
 
 	for_each_sched_entity(se) {
 		cfs_rq = cfs_rq_of(se);
 
-		if (cfs_rq_throttled(cfs_rq))
-			break;
+		if (!cfs_rq_throttled(cfs_rq)){
+			update_load_avg(cfs_rq, se, UPDATE_TG);
+			list_add_leaf_cfs_rq(cfs_rq);
+			continue;
+		}
 
+<<<<<<< HEAD
 		update_load_avg(se, UPDATE_TG);
+||||||| parent of 043ebbccdde6 (sched/fair: Fix unfairness caused by missing load decay)
+		update_load_avg(cfs_rq, se, UPDATE_TG);
+=======
+		if (list_add_leaf_cfs_rq(cfs_rq))
+			break;
+>>>>>>> 043ebbccdde6 (sched/fair: Fix unfairness caused by missing load decay)
 	}
 }
 #else
