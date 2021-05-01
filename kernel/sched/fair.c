@@ -8378,7 +8378,6 @@ static int find_energy_efficient_cpu(struct sched_domain *sd,
 
 		}
 
-<<<<<<< HEAD
 		/* Place target into NEXT slot */
 		eenv->cpu[EAS_CPU_NXT].cpu_id = target_cpu;
 
@@ -8390,27 +8389,6 @@ static int find_energy_efficient_cpu(struct sched_domain *sd,
 		/* take note if no target was found */
 		 if (eenv->cpu[EAS_CPU_NXT].cpu_id < 0)
 			 eenv->max_cpu_count = EAS_CPU_NXT;
-||||||| parent of 4892f51ad54d (sched/fair: Avoid redundant EAS calculation)
-		/* Evaluate the energy impact of using this CPU. */
-		if (max_spare_cap_cpu >= 0) {
-			cur_delta = compute_energy(p, max_spare_cap_cpu, pd);
-			cur_delta -= base_energy_pd;
-			if (cur_delta < best_delta) {
-				best_delta = cur_delta;
-				best_energy_cpu = max_spare_cap_cpu;
-			}
-		}
-=======
-		/* Evaluate the energy impact of using this CPU. */
-		if (max_spare_cap_cpu >= 0 && max_spare_cap_cpu != prev_cpu) {
-			cur_delta = compute_energy(p, max_spare_cap_cpu, pd);
-			cur_delta -= base_energy_pd;
-			if (cur_delta < best_delta) {
-				best_delta = cur_delta;
-				best_energy_cpu = max_spare_cap_cpu;
-			}
-		}
->>>>>>> 4892f51ad54d (sched/fair: Avoid redundant EAS calculation)
 	}
 
 	if (eenv->max_cpu_count == EAS_CPU_NXT) {
@@ -12418,14 +12396,9 @@ static void propagate_entity_cfs_rq(struct sched_entity *se)
 			continue;
 		}
 
-<<<<<<< HEAD
 		update_load_avg(se, UPDATE_TG);
-||||||| parent of 043ebbccdde6 (sched/fair: Fix unfairness caused by missing load decay)
-		update_load_avg(cfs_rq, se, UPDATE_TG);
-=======
 		if (list_add_leaf_cfs_rq(cfs_rq))
 			break;
->>>>>>> 043ebbccdde6 (sched/fair: Fix unfairness caused by missing load decay)
 	}
 }
 #else
