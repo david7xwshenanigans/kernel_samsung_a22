@@ -156,6 +156,7 @@ static inline int page_lru_refs(struct page *page)
 	return ((flags & LRU_REFS_MASK) >> LRU_REFS_PGOFF) + workingset;
 }
 
+
 static inline int page_lru_gen(struct page *page)
 {
 	unsigned long flags = READ_ONCE(page->flags);
