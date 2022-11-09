@@ -417,6 +417,8 @@ struct lru_gen_mm_walk {
 	unsigned long max_seq;
 	/* the next address within an mm to scan */
 	unsigned long next_addr;
+	/* Unused -- for ABI compatibility */
+	unsigned long bitmap[BITS_TO_LONGS(MIN_LRU_BATCH)];
 	/* to batch promoted pages */
 	int nr_pages[MAX_NR_GENS][ANON_AND_FILE][MAX_NR_ZONES];
 	/* to batch the mm stats */
@@ -424,7 +426,7 @@ struct lru_gen_mm_walk {
 	/* total batched items */
 	int batched;
 	bool can_swap;
-	bool force_scan;
+	bool full_scan;
 };
 
 void lru_gen_init_lruvec(struct lruvec *lruvec);
