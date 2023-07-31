@@ -529,6 +529,7 @@ static int tap_open(struct inode *inode, struct file *file)
 	q->sock.file = file;
 	q->sock.ops = &tap_socket_ops;
 	sock_init_data(&q->sock, &q->sk);
+	q->sk.sk_uid = current_fsuid();
 	q->sk.sk_write_space = tap_sock_write_space;
 	q->sk.sk_destruct = tap_sock_destruct;
 	q->flags = IFF_VNET_HDR | IFF_NO_PI | IFF_TAP;
