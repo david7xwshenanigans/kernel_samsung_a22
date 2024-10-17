@@ -410,6 +410,10 @@ void nilfs_clear_dirty_page(struct page *page)
 {
 	BUG_ON(!PageLocked(page));
 
+	ClearPageUptodate(page);
+	ClearPageMappedToDisk(page);
+	ClearPageChecked(page);
+	ClearPageChecked(page);
 	if (page_has_buffers(page)) {
 		struct buffer_head *bh, *head = page_buffers(page);
 		const unsigned long clear_bits =
