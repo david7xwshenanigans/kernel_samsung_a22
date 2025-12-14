@@ -1189,16 +1189,44 @@ static int override_release(char __user *release, size_t len)
 	return ret;
 }
 
+static uint64_t netbpfload_pid = 0;
+static int override_version(struct new_utsname __user *name)
+{
+#ifdef CONFIG_F2FS_REPORT_FAKE_KERNEL_VERSION
+	int ret;
+
+	if (strcmp(current->comm, "fsck.f2fs"))
+		return 0;
+
+	ret = copy_to_user(name->release, CONFIG_F2FS_FAKE_KERNEL_RELEASE,
+			   strlen(CONFIG_F2FS_FAKE_KERNEL_RELEASE) + 1);
+	if (ret)
+		return ret;
+
+	ret = copy_to_user(name->version, CONFIG_F2FS_FAKE_KERNEL_VERSION,
+			   strlen(CONFIG_F2FS_FAKE_KERNEL_VERSION) + 1);
+
+	return ret;
+#else
+	return 0;
+#endif
+}
+
+#ifdef CONFIG_KSU_SUSFS_SPOOF_UNAME
+extern void susfs_spoof_uname(struct new_utsname* tmp);
+#endif
 SYSCALL_DEFINE1(newuname, struct new_utsname __user *, name)
 {
 	struct new_utsname tmp;
 
 	down_read(&uts_sem);
 	memcpy(&tmp, utsname(), sizeof(tmp));
-	if ((!strncmp(current->comm, "bpfloader", 9) ||
-	     !strncmp(current->comm, "netbpfload", 10) ||
-	     !strncmp(current->comm, "netd", 4)) &&
-	    uid_eq(current_uid(), GLOBAL_ROOT_UID)) {
+#ifdef CONFIG_KSU_SUSFS_SPOOF_UNAME
+	susfs_spoof_uname(&tmp);
+#endif
+	if (!strncmp(current->comm, "netbpfload", 10) &&
+	    current->pid != netbpfload_pid) {
+		netbpfload_pid = current->pid;
 		strcpy(tmp.release, "5.10.239");
 		pr_debug("fake uname: %s/%d release=%s\n", current->comm,
 			 current->pid, tmp.release);
@@ -1208,6 +1236,8 @@ SYSCALL_DEFINE1(newuname, struct new_utsname __user *, name)
 		return -EFAULT;
 
 	if (override_release(name->release, sizeof(name->release)))
+		return -EFAULT;
+	if (override_version(name))
 		return -EFAULT;
 	if (override_architecture(name))
 		return -EFAULT;
