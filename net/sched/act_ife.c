@@ -749,6 +749,11 @@ static int tcf_ife_encode(struct sk_buff *skb, const struct tc_action *a,
 		skb_push(skb, skb->dev->hard_header_len);
 
 	ife_meta = ife_encode(skb, metalen);
+	if (!ife_meta) {
+		ife->tcf_qstats.drops++;
+		spin_unlock(&ife->tcf_lock);
+		return TC_ACT_SHOT;
+	}
 
 	/* XXX: we dont have a clever way of telling encode to
 	 * not repeat some of the computations that are done by
