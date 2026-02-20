@@ -168,6 +168,10 @@ unsigned long sysctl_anon_min_kbytes __read_mostly = CONFIG_ANON_MIN_KBYTES;
 unsigned long sysctl_clean_low_kbytes __read_mostly = CONFIG_CLEAN_LOW_KBYTES;
 unsigned long sysctl_clean_min_kbytes __read_mostly = CONFIG_CLEAN_MIN_KBYTES;
 
+unsigned long sysctl_anon_min_kbytes __read_mostly = CONFIG_ANON_MIN_KBYTES;
+unsigned long sysctl_clean_low_kbytes __read_mostly = CONFIG_CLEAN_LOW_KBYTES;
+unsigned long sysctl_clean_min_kbytes __read_mostly = CONFIG_CLEAN_MIN_KBYTES;
+
 /*
  * From 0 .. 100.  Higher means more swappy.
  */
@@ -2373,7 +2377,6 @@ static void prepare_workingset_protection(pg_data_t *pgdat, struct scan_control 
 		sc->clean_below_min = 0;
 	}
 }
-
 enum scan_balance {
 	SCAN_EQUAL,
 	SCAN_FRACT,
@@ -2677,6 +2680,21 @@ static void get_scan_count(struct lruvec *lruvec, struct mem_cgroup *memcg,
 	}
 
 	/*
+	 * Force-scan anon if clean file pages is under vm.clean_low_kbytes
+	 * or vm.clean_min_kbytes.
+	 */
+	if (sc->clean_below_low || sc->clean_below_min) {
+		scan_balance = SCAN_ANON;
+		goto out;
+	}
+
+	if (current_is_kswapd() && need_memory_boosting() &&
+	    !is_too_low_file()) {
+		scan_balance = SCAN_FILE;
+		goto out;
+	}
+
+	/*
 	 * If there is enough inactive page cache, i.e. if the size of the
 	 * inactive list is greater than that of the active list *and* the
 	 * inactive list actually has some pages to scan on this priority, we
@@ -2788,6 +2806,25 @@ out:
 		default:
 			/* Look ma, no brain */
 			BUG();
+		}
+
+		/*
+		 * Hard protection of the working set.
+		 */
+		if (file) {
+			/*
+			 * Don't reclaim file pages when the amount of
+			 * clean file pages is below vm.clean_min_kbytes.
+			 */
+			if (sc->clean_below_min)
+				scan = 0;
+		} else {
+			/*
+			 * Don't reclaim anonymous pages when their
+			 * amount is below vm.anon_min_kbytes.
+			 */
+			if (sc->anon_below_min)
+				scan = 0;
 		}
 
 		/*
