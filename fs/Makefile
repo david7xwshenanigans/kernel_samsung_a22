@@ -17,16 +17,6 @@ obj-y :=	open.o read_write.o file_table.o super.o \
 		fsopen.o \
 		fs_context.o fs_parser.o
 
-# LGE_CHANGE_S
-#
-# do read/mmap profiling during booting
-# in order to use the data as readahead args
-#
-# byungchul.park@lge.com 20120503
-obj-y += sreadahead_prof.o
-# LGE_CHANGE_E
-
-
 obj-$(CONFIG_KSU_SUSFS) += susfs.o
 
 ifeq ($(CONFIG_BLOCK),y)
