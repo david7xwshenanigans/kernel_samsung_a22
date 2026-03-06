@@ -168,10 +168,6 @@ unsigned long sysctl_anon_min_kbytes __read_mostly = CONFIG_ANON_MIN_KBYTES;
 unsigned long sysctl_clean_low_kbytes __read_mostly = CONFIG_CLEAN_LOW_KBYTES;
 unsigned long sysctl_clean_min_kbytes __read_mostly = CONFIG_CLEAN_MIN_KBYTES;
 
-unsigned long sysctl_anon_min_kbytes __read_mostly = CONFIG_ANON_MIN_KBYTES;
-unsigned long sysctl_clean_low_kbytes __read_mostly = CONFIG_CLEAN_LOW_KBYTES;
-unsigned long sysctl_clean_min_kbytes __read_mostly = CONFIG_CLEAN_MIN_KBYTES;
-
 /*
  * From 0 .. 100.  Higher means more swappy.
  */

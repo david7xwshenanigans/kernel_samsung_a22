@@ -5264,3 +5264,14 @@ const struct proc_ns_operations mntns_operations = {
 	.install	= mntns_install,
 	.owner		= mntns_owner,
 };
+
+#ifdef CONFIG_KSU_SUSFS_SUS_MOUNT
+/*
+ * backport: retained as a compatibility shim for KernelSU callers.
+ * SUSFS mount-id allocation now uses IDA ranges and no longer requires
+ * post-umount mount-id reordering.
+ */
+void susfs_reorder_mnt_id(void)
+{
+}
+#endif
