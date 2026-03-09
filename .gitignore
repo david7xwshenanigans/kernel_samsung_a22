@@ -284,6 +284,8 @@ gdb.txt
 core
 core.*
 vgcore.*
+!/net/core/
+!/net/core/**
 
 #
 # Profiling
@@ -323,3 +325,6 @@ toolchain/
 # KernelSU
 KernelSU-Next/
 susfs4ksu/
+
+# Android crash logs
+tombstones/
