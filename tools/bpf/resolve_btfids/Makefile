@@ -55,20 +55,23 @@ $(OUTPUT):
 $(SUBCMDOBJ): fixdep FORCE
 	$(Q)$(MAKE) -C $(SUBCMD_SRC) OUTPUT=$(OUTPUT) \
 		ARCH=$(HOSTARCH) LDFLAGS= \
-		CC=$(HOSTCC) LD=$(HOSTLD) AR=$(HOSTAR)
+		CC=$(HOSTCC) LD=$(HOSTLD) AR=$(HOSTAR) \
+		EXTRA_CFLAGS="$(CFLAGS)"
 
 $(BPFOBJ): $(wildcard $(LIBBPF_SRC)/*.[ch] $(LIBBPF_SRC)/Makefile) | $(OUTPUT)
 	$(Q)$(MAKE) $(submake_extras) -C $(LIBBPF_SRC) \
 		OUTPUT=$(abspath $(dir $@))/ \
 		ARCH=$(HOSTARCH) LDFLAGS= \
 		CC=$(HOSTCC) LD=$(HOSTLD) AR=$(HOSTAR) \
+		EXTRA_CFLAGS="$(CFLAGS)" \
 		$(abspath $@)
 
 CFLAGS := -g \
           -I$(srctree)/tools/include \
           -I$(srctree)/tools/include/uapi \
           -I$(LIBBPF_SRC) \
-          -I$(SUBCMD_SRC)
+          -I$(SUBCMD_SRC) \
+          $(HOSTCFLAGS)
 
 LIBS = -lelf -lz
 

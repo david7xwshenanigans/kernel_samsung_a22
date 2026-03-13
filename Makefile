@@ -462,7 +462,7 @@ LDFLAGS :=
 GCC_PLUGINS_CFLAGS :=
 CLANG_FLAGS :=
 
-export ARCH SRCARCH CONFIG_SHELL HOSTCC HOSTCFLAGS CROSS_COMPILE LD CC
+export ARCH SRCARCH CONFIG_SHELL HOSTCC HOSTCFLAGS CROSS_COMPILE LD CC LLVM LLVM_IAS
 export CPP AR NM STRIP OBJCOPY OBJDUMP PAHOLE RESOLVE_BTFIDS READELF HOSTLDFLAGS HOST_LOADLIBES
 export MAKE AWK GENKSYMS INSTALLKERNEL PERL PYTHON UTS_MACHINE
 export HOSTCXX HOSTCXXFLAGS LDFLAGS_MODULE CHECK CHECKFLAGS
@@ -1145,7 +1145,7 @@ export mod_sign_cmd
 HOST_LIBELF_LIBS = $(shell pkg-config libelf --libs 2>/dev/null || echo -lelf)
 
 has_libelf := $(call try-run,\
-		echo "int main() {}" | $(HOSTCC) -xc -o /dev/null $(HOST_LIBELF_LIBS) -,1,0)
+    echo "int main() {}" | $(HOSTCC) -xc -o /dev/null $(HOSTLDFLAGS) $(HOST_LIBELF_LIBS) -,1,0)
 
 ifdef CONFIG_STACK_VALIDATION
   ifeq ($(has_libelf),1)
@@ -1320,8 +1320,11 @@ endif
 $(RESOLVE_BTFIDS): FORCE
 	$(Q)mkdir -p $(abspath $(dir $@))
 	$(Q)$(MAKE) -C $(srctree)/tools/bpf/resolve_btfids \
-		srctree=$(abspath $(srctree)) \
-		OUTPUT=$(abspath $(dir $@))/
+    	srctree=$(abspath $(srctree)) \
+    	OUTPUT=$(abspath $(dir $@))/ \
+    	HOSTLD=$(HOSTLD) \
+    	HOSTCFLAGS="$(HOSTCFLAGS)" \
+    	HOSTLDFLAGS="$(HOSTLDFLAGS)"
 
 # Disable clang-specific config options when using a different compiler
 clang-specific-configs := LTO_CLANG CFI_CLANG SHADOW_CALL_STACK INIT_STACK_ALL_ZERO
