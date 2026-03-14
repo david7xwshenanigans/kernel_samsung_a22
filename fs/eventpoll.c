@@ -18,6 +18,7 @@
 #include <linux/file.h>
 #include <linux/signal.h>
 #include <linux/errno.h>
+#include <linux/limits.h>
 #include <linux/mm.h>
 #include <linux/slab.h>
 #include <linux/poll.h>
@@ -1735,6 +1736,34 @@ static inline struct timespec64 ep_set_mstimeout(long ms)
 	return timespec64_add_safe(now, ts);
 }
 
+static int epoll_pwait2_get_timeout(const struct __kernel_timespec __user *timeout,
+				    int *timeout_ms)
+{
+	struct timespec64 ts;
+	u64 timeout_ns;
+	u64 ms;
+
+	if (!timeout) {
+		*timeout_ms = -1;
+		return 0;
+	}
+
+	if (get_timespec64(&ts, timeout))
+		return -EFAULT;
+	if (!timespec64_valid(&ts))
+		return -EINVAL;
+
+	timeout_ns = timespec64_to_ns(&ts);
+	ms = timeout_ns / NSEC_PER_MSEC;
+	if (timeout_ns % NSEC_PER_MSEC)
+		ms++;
+	if (ms > INT_MAX)
+		ms = INT_MAX;
+
+	*timeout_ms = (int)ms;
+	return 0;
+}
+
 /**
  * ep_poll - Retrieves ready events, and delivers them to the caller supplied
  *           event buffer.
@@ -2245,6 +2274,21 @@ SYSCALL_DEFINE6(epoll_pwait, int, epfd, struct epoll_event __user *, events,
 	return error;
 }
 
+SYSCALL_DEFINE6(epoll_pwait2, int, epfd, struct epoll_event __user *, events,
+		int, maxevents, const struct __kernel_timespec __user *, timeout,
+		const sigset_t __user *, sigmask, size_t, sigsetsize)
+{
+	int timeout_ms;
+	int error;
+
+	error = epoll_pwait2_get_timeout(timeout, &timeout_ms);
+	if (error)
+		return error;
+
+	return sys_epoll_pwait(epfd, events, maxevents, timeout_ms,
+			       sigmask, sigsetsize);
+}
+
 #ifdef CONFIG_COMPAT
 COMPAT_SYSCALL_DEFINE6(epoll_pwait, int, epfd,
 			struct epoll_event __user *, events,
@@ -2288,6 +2332,24 @@ COMPAT_SYSCALL_DEFINE6(epoll_pwait, int, epfd,
 	}
 
 	return err;
+}
+
+COMPAT_SYSCALL_DEFINE6(epoll_pwait2, int, epfd,
+			struct epoll_event __user *, events,
+			int, maxevents,
+			const struct __kernel_timespec __user *, timeout,
+			const compat_sigset_t __user *, sigmask,
+			compat_size_t, sigsetsize)
+{
+	int timeout_ms;
+	int err;
+
+	err = epoll_pwait2_get_timeout(timeout, &timeout_ms);
+	if (err)
+		return err;
+
+	return compat_sys_epoll_pwait(epfd, events, maxevents, timeout_ms,
+				      sigmask, sigsetsize);
 }
 #endif
 

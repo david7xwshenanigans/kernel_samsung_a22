@@ -51,6 +51,7 @@ struct statfs64;
 struct statx;
 struct __sysctl_args;
 struct sysinfo;
+struct __kernel_timespec;
 struct timespec;
 struct timeval;
 struct timex;
@@ -674,6 +675,11 @@ asmlinkage long sys_epoll_wait(int epfd, struct epoll_event __user *events,
 				int maxevents, int timeout);
 asmlinkage long sys_epoll_pwait(int epfd, struct epoll_event __user *events,
 				int maxevents, int timeout,
+				const sigset_t __user *sigmask,
+				size_t sigsetsize);
+asmlinkage long sys_epoll_pwait2(int epfd, struct epoll_event __user *events,
+				int maxevents,
+				const struct __kernel_timespec __user *timeout,
 				const sigset_t __user *sigmask,
 				size_t sigsetsize);
 asmlinkage long sys_gethostname(char __user *name, int len);
