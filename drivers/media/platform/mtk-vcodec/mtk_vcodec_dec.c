@@ -876,7 +876,9 @@ static int vidioc_try_decoder_cmd(struct file *file, void *priv,
 		cmd->start.format = V4L2_DEC_START_FMT_NONE;
 		break;
 	default:
-		return -EINVAL;
+		mtk_v4l2_err("unsupported decoder cmd %u, ignore", cmd->cmd);
+		cmd->flags = 0;
+		break;
 	}
 	return 0;
 }
@@ -922,7 +924,9 @@ static int vidioc_decoder_cmd(struct file *file, void *priv,
 		break;
 
 	default:
-		return -EINVAL;
+		mtk_v4l2_err("[%d] unsupported decoder cmd %u, ignore",
+			     ctx->id, cmd->cmd);
+		break;
 	}
 
 	return 0;
@@ -1140,18 +1144,16 @@ static int mtk_vdec_set_param(struct mtk_vcodec_ctx *ctx)
 	if (ctx->dec_param_change & MTK_DEC_PARAM_WAIT_KEY_FRAME) {
 		in[0] = (unsigned long)ctx->dec_params.wait_key_frame;
 		if (vdec_if_set_param(ctx, SET_PARAM_WAIT_KEY_FRAME, in) != 0) {
-			mtk_v4l2_err("[%d] Error!! Cannot set param", ctx->id);
-			return -EINVAL;
+			mtk_v4l2_err("[%d] Warning!! Cannot set wait key frame param", ctx->id);
 		}
 		ctx->dec_param_change &= (~MTK_DEC_PARAM_WAIT_KEY_FRAME);
 	}
 
 	if (ctx->dec_param_change & MTK_DEC_PARAM_NAL_SIZE_LENGTH) {
-		in[0] = (unsigned long)ctx->dec_params.wait_key_frame;
+		in[0] = (unsigned long)ctx->dec_params.nal_size_length;
 		if (vdec_if_set_param(ctx, SET_PARAM_NAL_SIZE_LENGTH,
 					in) != 0) {
-			mtk_v4l2_err("[%d] Error!! Cannot set param", ctx->id);
-			return -EINVAL;
+			mtk_v4l2_err("[%d] Warning!! Cannot set NAL size length param", ctx->id);
 		}
 		ctx->dec_param_change &= (~MTK_DEC_PARAM_NAL_SIZE_LENGTH);
 	}
@@ -1159,8 +1161,7 @@ static int mtk_vdec_set_param(struct mtk_vcodec_ctx *ctx)
 	if (ctx->dec_param_change & MTK_DEC_PARAM_OPERATING_RATE) {
 		in[0] = (unsigned long)ctx->dec_params.operating_rate;
 		if (vdec_if_set_param(ctx, SET_PARAM_OPERATING_RATE, in) != 0) {
-			mtk_v4l2_err("[%d] Error!! Cannot set param", ctx->id);
-			return -EINVAL;
+			mtk_v4l2_err("[%d] Warning!! Cannot set operating rate param", ctx->id);
 		}
 		ctx->dec_param_change &= (~MTK_DEC_PARAM_OPERATING_RATE);
 	}
@@ -1552,7 +1553,13 @@ static int vidioc_vdec_g_selection(struct file *file, void *priv,
 		}
 		break;
 	default:
-		return -EINVAL;
+		mtk_v4l2_err("[%d] unsupported selection target %u, ignore",
+			     ctx->id, s->target);
+		s->r.left = 0;
+		s->r.top = 0;
+		s->r.width = q_data->visible_width;
+		s->r.height = q_data->visible_height;
+		break;
 	}
 
 	if (ctx->state < MTK_STATE_HEADER) {
@@ -1584,7 +1591,13 @@ static int vidioc_vdec_s_selection(struct file *file, void *priv,
 		s->r.height = ctx->picinfo.pic_h;
 		break;
 	default:
-		return -EINVAL;
+		mtk_v4l2_err("[%d] unsupported selection target %u, ignore",
+			     ctx->id, s->target);
+		s->r.left = 0;
+		s->r.top = 0;
+		s->r.width = ctx->picinfo.pic_w;
+		s->r.height = ctx->picinfo.pic_h;
+		break;
 	}
 
 	return 0;
@@ -2711,7 +2724,10 @@ static int mtk_vdec_g_v_ctrl(struct v4l2_ctrl *ctrl)
 		}
 		break;
 	default:
-		ret = -EINVAL;
+		mtk_v4l2_err("[%d] unsupported get-ctrl id 0x%x, ignore",
+			     ctx->id, ctrl->id);
+		ctrl->val = 0;
+		ret = 0;
 	}
 	return ret;
 }
@@ -2788,9 +2804,25 @@ static int mtk_vdec_s_ctrl(struct v4l2_ctrl *ctrl)
 	case V4L2_CID_MPEG_MTK_LOG:
 		mtk_vcodec_set_log(ctx, ctrl->p_new.p_char);
 		break;
+	case V4L2_CID_MPEG_MTK_INTERLACING:
+    	/* interlacing hint from userspace, not used by hw */
+    	break;
+	case V4L2_CID_MPEG_MTK_COLOR_DESC:
+	case V4L2_CID_MPEG_MTK_ASPECT_RATIO:
+		/*
+		 * Userspace may set color/aspect metadata, but the decoder does
+		 * not consume it. Accept to avoid -EINVAL during init.
+		 */
+		break;
+	case V4L2_CID_MPEG_MTK_CODEC_TYPE:
+		/*
+		 * Userspace (codec2) sets this control, but the kernel decoder
+		 * does not use it. Accept to avoid -EINVAL during init.
+		 */
+		break;
 	default:
-		mtk_v4l2_err("ctrl-id=%x not support!", ctrl->id);
-		return -EINVAL;
+		mtk_v4l2_err("ctrl-id=%x not support, ignore", ctrl->id);
+		return 0;
 	}
 
 	return 0;

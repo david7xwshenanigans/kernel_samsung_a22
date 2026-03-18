@@ -510,6 +510,14 @@ static int vidioc_venc_s_ctrl(struct v4l2_ctrl *ctrl)
 		p->maxrefpnum = ctrl->val;
 		ctx->param_change |= MTK_ENCODE_PARAM_MAX_REFP_NUM;
 		break;
+	case V4L2_CID_MPEG_MTK_ENCODE_REFP_MAX_FRAME_NUM:
+		/* Some userspace stacks use this alias; accept it. */
+		mtk_v4l2_debug(2,
+			"V4L2_CID_MPEG_MTK_ENCODE_REFP_MAX_FRAME_NUM: %d",
+			ctrl->val);
+		p->maxrefpnum = ctrl->val;
+		ctx->param_change |= MTK_ENCODE_PARAM_MAX_REFP_NUM;
+		break;
 	case V4L2_CID_MPEG_MTK_ENCODE_REFP_DISTANCE:
 		mtk_v4l2_debug(2,
 			"V4L2_CID_MPEG_MTK_ENCODE_REFP_DISTANCE: %d",
