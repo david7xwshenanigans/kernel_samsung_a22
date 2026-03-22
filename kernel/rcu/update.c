@@ -163,6 +163,12 @@ static atomic_t rcu_expedited_nesting = ATOMIC_INIT(1);
  */
 bool rcu_gp_is_expedited(void)
 {
+#ifdef CONFIG_WMK_PATCH_RCU_FORCE_NORMAL
+	/* Always use normal (non-expedited) grace periods.
+	 * Android's init pushes RCU into expedited mode which fires constant
+	 * IPIs across all active CPUs. Force normal mode to save active power. */
+	return false;
+#endif
 	return rcu_expedited || atomic_read(&rcu_expedited_nesting) ||
 	       rcu_scheduler_active == RCU_SCHEDULER_INIT;
 }
