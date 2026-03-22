@@ -194,8 +194,15 @@ static bool sugov_up_down_rate_limit(struct sugov_policy *sg_policy, u64 time,
 	}
 
 	if (next_freq < sg_policy->next_freq &&
-	    delta_ns < sg_policy->down_rate_delay_ns)
+	    delta_ns < sg_policy->down_rate_delay_ns) {
+#ifdef CONFIG_WMK_PATCH_SCHEDUTIL_SCREEN_OFF_FAST_DOWN
+		/* Screen is off: drop to idle frequency immediately.
+		 * No UI is waiting, so down_rate_delay just wastes power. */
+		if (!sugov_screen_on)
+			return false;
+#endif
 			return true;
+	}
 
 	return false;
 }
