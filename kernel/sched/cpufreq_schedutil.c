@@ -23,6 +23,10 @@
 #ifdef CONFIG_WMK_PATCH_SCHEDUTIL_SCREEN_OFF_RATE_LIMIT
 static bool sugov_screen_on = true;
 
+#ifdef CONFIG_WMK_PATCH_SCHED_DYNAMIC_CAPACITY_MARGIN
+extern unsigned int capacity_margin;
+#endif
+
 static int sugov_fb_notifier_callback(struct notifier_block *self,
 				      unsigned long event, void *data)
 {
@@ -37,9 +41,18 @@ static int sugov_fb_notifier_callback(struct notifier_block *self,
 	switch (blank) {
 	case FB_BLANK_UNBLANK:
 		sugov_screen_on = true;
+#ifdef CONFIG_WMK_PATCH_SCHED_DYNAMIC_CAPACITY_MARGIN
+		/* Restore 1.25x frequency headroom for UI fluidity. */
+		capacity_margin = 1280;
+#endif
 		break;
 	case FB_BLANK_POWERDOWN:
 		sugov_screen_on = false;
+#ifdef CONFIG_WMK_PATCH_SCHED_DYNAMIC_CAPACITY_MARGIN
+		/* Remove frequency headroom buffer during standby.
+		 * Allows CPU to run ~25% slower for the same background load. */
+		capacity_margin = 1024;
+#endif
 		break;
 	default:
 		break;
