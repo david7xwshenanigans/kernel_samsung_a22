@@ -101,7 +101,7 @@ static struct all_cpu_idle all_cpu_idle_data = {
 	0,
 	0,
 	500000000, /* window     = 500 ms */
-	85         /* threshold >=  85  % */
+	80         /* threshold >=  80  % */
 };
 
 static DEFINE_SPINLOCK(all_cpu_idle_spin_lock);
