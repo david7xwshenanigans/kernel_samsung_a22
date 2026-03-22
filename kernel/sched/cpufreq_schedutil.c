@@ -303,6 +303,13 @@ static void sugov_set_iowait_boost(struct sugov_cpu *sg_cpu, u64 time,
 {
 	unsigned int max_boost;
 
+#ifdef CONFIG_WMK_PATCH_SCHEDUTIL_SCREEN_OFF_IOWAIT_DISABLE
+	/* Do not boost for background I/O when the screen is off.
+	 * Music players and sync jobs should not spike the CPU freq. */
+	if (!sugov_screen_on)
+		return;
+#endif
+
 	if (flags & SCHED_CPUFREQ_IOWAIT) {
 		if (sg_cpu->iowait_boost_pending)
 			return;
