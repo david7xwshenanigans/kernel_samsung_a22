@@ -4546,6 +4546,21 @@ static int kbase_device_runtime_suspend(struct device *dev)
 		return -ENODEV;
 
 	dev_dbg(dev, "Callback %s\n", __func__);
+
+#ifdef CONFIG_WMK_PATCH_MALI_R54P2_DEFER_POWER_DOWN
+	/*
+	 * r54p2 Backport: If the GPU became active while runtime suspend was
+	 * already in flight, abort by returning -EBUSY to defer the power down.
+	 * Forcing the regulator off while active causes L2/MCU state-machine
+	 * warnings and expensive re-initialisation on the next wake-up.
+	 */
+	if (kbdev->pm.active_count ||
+	    kbdev->pm.backend.poweroff_wait_in_progress) {
+		dev_dbg(dev, "GPU active on runtime suspend — deferring power down\n");
+		return -EBUSY;
+	}
+#endif
+
 #if defined(CONFIG_MALI_DEVFREQ) && \
 		(LINUX_VERSION_CODE >= KERNEL_VERSION(3, 8, 0))
 	if (kbdev->devfreq)
