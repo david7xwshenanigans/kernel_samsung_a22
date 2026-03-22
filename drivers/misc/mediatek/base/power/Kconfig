@@ -167,4 +167,11 @@ config WMK_PATCH_MCDI_ALL_CPU_IDLE_THD
 	  Reduce the all-CPU idle ratio threshold from 85% to 80% so the
 	  menu governor can bypass the typical-interval limiter sooner.
 
+config WMK_PATCH_SCHEDUTIL_SCREEN_OFF_RATE_LIMIT
+	bool "WMK: Schedutil screen-off up rate limit"
+	default n
+	help
+	  Increase the schedutil up rate limit when the screen is off to
+	  reduce frequency spikes from background tasks.
+
 endmenu

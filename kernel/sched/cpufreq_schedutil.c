@@ -15,8 +15,43 @@
 #include <linux/kthread.h>
 #include <uapi/linux/sched/types.h>
 #include <linux/slab.h>
+#include <linux/fb.h>
+#include <linux/notifier.h>
 #include <trace/events/power.h>
 #include <trace/events/sched.h>
+
+#ifdef CONFIG_WMK_PATCH_SCHEDUTIL_SCREEN_OFF_RATE_LIMIT
+static bool sugov_screen_on = true;
+
+static int sugov_fb_notifier_callback(struct notifier_block *self,
+				      unsigned long event, void *data)
+{
+	struct fb_event *evdata = data;
+	int blank;
+
+	if (event != FB_EVENT_BLANK)
+		return 0;
+
+	blank = *(int *)evdata->data;
+
+	switch (blank) {
+	case FB_BLANK_UNBLANK:
+		sugov_screen_on = true;
+		break;
+	case FB_BLANK_POWERDOWN:
+		sugov_screen_on = false;
+		break;
+	default:
+		break;
+	}
+
+	return 0;
+}
+
+static struct notifier_block sugov_fb_notifier = {
+	.notifier_call = sugov_fb_notifier_callback,
+};
+#endif
 
 #include "sched.h"
 #include "tune.h"
@@ -147,9 +182,16 @@ static bool sugov_up_down_rate_limit(struct sugov_policy *sg_policy, u64 time,
 
 	delta_ns = time - sg_policy->last_freq_update_time;
 
-	if (next_freq > sg_policy->next_freq &&
-	    delta_ns < sg_policy->up_rate_delay_ns)
+	if (next_freq > sg_policy->next_freq) {
+		s64 up_delay_ns = sg_policy->up_rate_delay_ns;
+
+#ifdef CONFIG_WMK_PATCH_SCHEDUTIL_SCREEN_OFF_RATE_LIMIT
+		if (!sugov_screen_on)
+			up_delay_ns *= 3;
+#endif
+		if (delta_ns < up_delay_ns)
 			return true;
+	}
 
 	if (next_freq < sg_policy->next_freq &&
 	    delta_ns < sg_policy->down_rate_delay_ns)
@@ -973,6 +1015,9 @@ struct cpufreq_governor *cpufreq_default_governor(void)
 
 static int __init sugov_register(void)
 {
+#ifdef CONFIG_WMK_PATCH_SCHEDUTIL_SCREEN_OFF_RATE_LIMIT
+	fb_register_client(&sugov_fb_notifier);
+#endif
 	return cpufreq_register_governor(&schedutil_gov);
 }
 fs_initcall(sugov_register);
