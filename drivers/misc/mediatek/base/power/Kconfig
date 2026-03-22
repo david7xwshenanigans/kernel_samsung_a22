@@ -134,65 +134,147 @@ menu "WMK patch toggles"
 config WMK_PATCH_CPU_G75_UV30
 	bool "WMK: MT6768 G75 CPU undervolt -30mV"
 	default n
-	help
-	  Enable the existing G75 CPU OPP undervolt (-30mV) for MT6768.
-	  Disable to use stock voltages.
+	---help---
+	  Reduces the baseline voltage for all Cortex-G75 (big) cluster OPPs
+	  by 30mV. This lowers active power consumption and heat during
+	  intensive tasks. Requires a stable chip; if the device reboots
+	  under load, disable this option.
 
 config WMK_PATCH_CPU_G75_UV_STEP
 	bool "WMK: MT6768 G75 CPU extra -6.25mV step (LL/CCI OPP0-12)"
 	default n
-	depends on WMK_PATCH_CPU_G75_UV30
-	help
-	  Apply an additional one-PMIC-step (6.25mV) undervolt on top of the
-	  -30mV G75 CPU undervolt for LL/CCI OPP0-12.
+	select WMK_PATCH_CPU_G75_UV30
+	---help---
+	  Applies an additional 6.25mV (one PMIC tick) reduction to the 
+	  Little cluster (LL) and CCI interconnect for OPP levels 0 through 12.
+	  This further optimizes power for background and mid-range 
+	  interactive workloads on top of the base -30mV undervolt.
+	  Selecting this will automatically enable the base -30mV undervolt.
 
 config WMK_PATCH_GPU_DVFS_UV
 	bool "WMK: MT6768 GPU DVFS undervolt"
 	default n
-	help
-	  Enable the GPU DVFS undervolt table for MT6768.
-	  Disable to use stock voltages.
+	---help---
+	  Applies a custom undervolt table to the Mali GPU DVFS states.
+	  Reduces power draw during 3D rendering and UI composition by
+	  lowering the voltage/frequency curve. Tested to provide ~5-10%
+	  GPU power savings depending on load.
 
 config WMK_PATCH_MTK_MENU_SCREEN_OFF_PREDICT
 	bool "WMK: mtk_menu relax prediction when screen is off"
+	select WMK_PATCH_SCHEDUTIL_SCREEN_OFF_RATE_LIMIT
 	default n
-	help
-	  Skip the typical-interval limiter when the panel is off to allow
-	  deeper idle entry during standby.
+	---help---
+	  When the screen is off, the mtk_menu governor skips the 
+	  typical-interval prediction limiter. This allows the system to
+	  enter deep idle states (rgidle/MCDI) more aggressively during
+	  standby, significantly reducing idle drain. Selecting this will
+	  automatically enable the required screen-state notifier.
 
 config WMK_PATCH_MCDI_ALL_CPU_IDLE_THD
 	bool "WMK: MCDI all-CPU idle threshold 80%"
 	default n
-	help
-	  Reduce the all-CPU idle ratio threshold from 85% to 80% so the
-	  menu governor can bypass the typical-interval limiter sooner.
+	---help---
+	  Lowers the all-CPU idle ratio threshold from 85% to 80%.
+	  This makes the MCDI (Multi-Core Deep Idle) governor more 
+	  permissive, allowing deeper cluster-wide sleep states to be
+	  reached even when some background residency remains. Best 
+	  used in conjunction with other MCDI/idle window tweaks.
 
 config WMK_PATCH_SCHEDUTIL_SCREEN_OFF_RATE_LIMIT
 	bool "WMK: Schedutil screen-off up rate limit"
 	default n
-	help
-	  Increase the schedutil up rate limit when the screen is off to
-	  reduce frequency spikes from background tasks.
+	---help---
+	  Enables a Framebuffer notifier that detects when the screen is
+	  turned off. During standby, it triples the schedutil 'up' rate
+	  delay, preventing brief background bursts from immediately 
+	  ramping the CPU frequency to maximum. Essential base for other
+	  screen-off optimizations.
 
 config WMK_PATCH_SCHEDTUNE_BOOST_HOLD
 	bool "WMK: Reduce SchedTune boost hold time to 10ms"
 	default n
-	help
-	  Reduce SCHEDTUNE_BOOST_HOLD_NS from 50ms to 10ms to allow frequency
-	  to drop faster after task bursts.
+	---help---
+	  Reduces the SchedTune boost residency from the stock 50ms to 10ms.
+	  This allows the CPU to drop frequency and release boost resources
+	  much sooner after a task burst completes, saving active power
+	  during jittery workloads like web browsing.
 
 config WMK_PATCH_MCDI_IDLE_WINDOW
 	bool "WMK: Reduce MCDI idle window to 100ms"
 	default n
-	help
-	  Reduce the all-CPU idle window from 500ms to 100ms to allow faster
-	  entry into deep idle states.
+	---help---
+	  Shortens the look-back window for all-CPU idle decisions from
+	  500ms to 100ms. Allows the governor to react faster to idle 
+	  opportunities, entering deep sleep states sooner after activity
+	  stops.
 
 config WMK_PATCH_MALI_SHADER_TIMEOUT
 	bool "WMK: Increase Mali shader power-off timeout"
 	default n
-	help
-	  Increase the shader core power-off tick from 2 (800us) to 4 (1.6ms)
-	  to reduce power-hungry thrashing.
+	---help---
+	  Increases the shader core power-off delay from 800us to 1.6ms.
+	  Prevents "shader thrashing" where the core is repeatedly powered 
+	  on and off during light GL workloads, which is more energy-intensive
+	  than simply keeping it powered for a slightly longer period.
+
+config WMK_PATCH_SCHEDUTIL_SCREEN_OFF_IOWAIT_DISABLE
+	bool "WMK: Disable schedutil iowait boost when screen is off"
+	select WMK_PATCH_SCHEDUTIL_SCREEN_OFF_RATE_LIMIT
+	default n
+	---help---
+	  Prevents background I/O operations (like media scanning or 
+	  cloud sync) from triggering frequency boosts while the device
+	  is in standby. This ensures the CPU stays at lower frequencies
+	  during sleep, even if background services are active.
+
+config WMK_PATCH_SCHEDUTIL_SCREEN_OFF_FAST_DOWN
+	bool "WMK: Bypass down-rate limit when screen is off"
+	select WMK_PATCH_SCHEDUTIL_SCREEN_OFF_RATE_LIMIT
+	default n
+	---help---
+	  Unconditionally bypasses the down_rate_delay when the screen 
+	  is off. This allows the CPU to drop to its minimum frequency 
+	  the instant a background task completes, bypassing the 
+	  wait-for-safety period usually required for UI smoothness.
+
+config WMK_PATCH_SCHED_DYNAMIC_CAPACITY_MARGIN
+	bool "WMK: Dynamically adjust capacity margin on screen state"
+	select WMK_PATCH_SCHEDUTIL_SCREEN_OFF_RATE_LIMIT
+	default n
+	---help---
+	  Removes the artificial 25% frequency headroom when the screen
+	  is off. While UI requires this margin for smoothness, standby
+	  tasks do not. Removing it allows the CPU to run at the most
+	  efficient energy point for background loads.
+
+config WMK_PATCH_RCU_FORCE_NORMAL
+	bool "WMK: Force normal RCU grace periods (battery saver)"
+	default n
+	---help---
+	  Disables "expedited" RCU grace periods which use frequent
+	  Inter-Processor Interrupts (IPIs) to wake all CPUs. Reverting
+	  to normal grace periods significantly reduces CPU wake-up
+	  overhead and active power consumption.
+
+config WMK_PATCH_SCHED_INCREASE_MIGRATION_COST
+	bool "WMK: Increase CFS task migration cost"
+	default n
+	---help---
+	  Raises the minimum cost to migrate a task between CPUs from
+	  33us to 500us. Discourages the scheduler from moving tasks 
+	  across clusters (LITTLE <-> big) for trivial loads, keeping 
+	  big cores asleep longer and reducing cache-bouncing overhead.
+
+config WMK_PATCH_MALI_R54P2_DEFER_POWER_DOWN
+	bool "WMK: Backport r54p2 GPU deferred power-down on runtime suspend"
+	depends on KBASE_PM_RUNTIME
+	default n
+	---help---
+	  Backports a critical stability and power fix from Mali r54p2.
+	  If the GPU becomes active during a runtime suspend request, it
+	  defers the power-down instead of forcing a regulator cut. 
+	  Prevents L2/MCU state machine warnings and expensive HW 
+	  re-initializations during rapid sleep/wake cycles.
 
 endmenu
