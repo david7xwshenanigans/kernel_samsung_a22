@@ -128,3 +128,43 @@ config MTK_QOS_V2
 	  It supports BW prediction, BW bound detection, and BW limiter.
 	  It is also mapped with sspm qos v2.
 	  If unsure, say N.
+
+menu "WMK patch toggles"
+
+config WMK_PATCH_CPU_G75_UV30
+	bool "WMK: MT6768 G75 CPU undervolt -30mV"
+	default n
+	help
+	  Enable the existing G75 CPU OPP undervolt (-30mV) for MT6768.
+	  Disable to use stock voltages.
+
+config WMK_PATCH_CPU_G75_UV_STEP
+	bool "WMK: MT6768 G75 CPU extra -6.25mV step (LL/CCI OPP0-12)"
+	default n
+	depends on WMK_PATCH_CPU_G75_UV30
+	help
+	  Apply an additional one-PMIC-step (6.25mV) undervolt on top of the
+	  -30mV G75 CPU undervolt for LL/CCI OPP0-12.
+
+config WMK_PATCH_GPU_DVFS_UV
+	bool "WMK: MT6768 GPU DVFS undervolt"
+	default n
+	help
+	  Enable the GPU DVFS undervolt table for MT6768.
+	  Disable to use stock voltages.
+
+config WMK_PATCH_MTK_MENU_SCREEN_OFF_PREDICT
+	bool "WMK: mtk_menu relax prediction when screen is off"
+	default n
+	help
+	  Skip the typical-interval limiter when the panel is off to allow
+	  deeper idle entry during standby.
+
+config WMK_PATCH_MCDI_ALL_CPU_IDLE_THD
+	bool "WMK: MCDI all-CPU idle threshold 80%"
+	default n
+	help
+	  Reduce the all-CPU idle ratio threshold from 85% to 80% so the
+	  menu governor can bypass the typical-interval limiter sooner.
+
+endmenu
