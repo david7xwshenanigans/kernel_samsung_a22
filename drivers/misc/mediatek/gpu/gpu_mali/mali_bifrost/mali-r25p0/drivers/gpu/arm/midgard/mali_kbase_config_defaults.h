@@ -105,7 +105,7 @@ enum {
 /**
  * Power Manager number of ticks before shader cores are powered off
  */
-#define DEFAULT_PM_POWEROFF_TICK_SHADER (2) /* 400-800us */
+#define DEFAULT_PM_POWEROFF_TICK_SHADER (4) /* 400-1600us */
 
 /**
  * Default scheduling tick granuality
