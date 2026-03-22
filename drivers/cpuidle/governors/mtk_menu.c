@@ -443,7 +443,11 @@ static int menu_select(struct cpuidle_driver *drv, struct cpuidle_device *dev,
 #endif
 
 #ifdef USE_TYPICAL_INTERVAL
-	if (is_screen_on() && !is_all_cpu_idle_criteria()) {
+	if (
+#ifdef CONFIG_WMK_PATCH_MTK_MENU_SCREEN_OFF_PREDICT
+		is_screen_on() &&
+#endif
+		!is_all_cpu_idle_criteria()) {
 		expected_interval = get_typical_interval(data);
 		expected_interval = min(expected_interval, data->next_timer_us);
 		/*
