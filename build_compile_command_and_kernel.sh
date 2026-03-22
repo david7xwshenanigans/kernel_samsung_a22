@@ -329,7 +329,7 @@ print_status "Section mismatch warnings only: enabled"
 print_section "KERNEL CONFIGURATION"
 print_status "Configuring kernel with a22_defconfig..."
 
-if make -C "$PREFIX" O="$PREFIX/out" ARCH=arm64 a22_defconfig; then
+if make -C "$PREFIX" O="$PREFIX/out" ARCH=arm64 a22_wmk_defconfig; then
     print_success "Kernel configuration completed"
 else
     print_error "Kernel configuration failed"
