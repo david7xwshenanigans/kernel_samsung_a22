@@ -268,7 +268,7 @@ config WMK_PATCH_SCHED_INCREASE_MIGRATION_COST
 
 config WMK_PATCH_MALI_R54P2_DEFER_POWER_DOWN
 	bool "WMK: Backport r54p2 GPU deferred power-down on runtime suspend"
-	depends on KBASE_PM_RUNTIME
+	depends on MTK_GPU_SUPPORT
 	default n
 	---help---
 	  Backports a critical stability and power fix from Mali r54p2.
