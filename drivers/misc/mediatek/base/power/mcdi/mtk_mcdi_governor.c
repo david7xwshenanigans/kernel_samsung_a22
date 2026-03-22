@@ -96,7 +96,7 @@ static DEFINE_SPINLOCK(mcdi_gov_spin_lock);
 static struct pm_qos_request mcdi_qos_request;
 
 #ifdef CONFIG_WMK_PATCH_MCDI_ALL_CPU_IDLE_THD
-#define WMK_MCDI_ALL_CPU_IDLE_THD	80
+#define WMK_MCDI_ALL_CPU_IDLE_THD	70
 #else
 #define WMK_MCDI_ALL_CPU_IDLE_THD	85
 #endif
@@ -106,7 +106,7 @@ static struct all_cpu_idle all_cpu_idle_data = {
 	0,
 	0,
 	0,
-	500000000, /* window     = 500 ms */
+	100000000, /* window     = 100 ms */
 	WMK_MCDI_ALL_CPU_IDLE_THD
 };
 
