@@ -106,7 +106,11 @@ static struct all_cpu_idle all_cpu_idle_data = {
 	0,
 	0,
 	0,
+#ifdef CONFIG_WMK_PATCH_MCDI_IDLE_WINDOW
 	100000000, /* window     = 100 ms */
+#else
+	500000000, /* window     = 500 ms */
+#endif
 	WMK_MCDI_ALL_CPU_IDLE_THD
 };
 

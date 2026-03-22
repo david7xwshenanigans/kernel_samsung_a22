@@ -105,7 +105,11 @@ enum {
 /**
  * Power Manager number of ticks before shader cores are powered off
  */
+#ifdef CONFIG_WMK_PATCH_MALI_SHADER_TIMEOUT
 #define DEFAULT_PM_POWEROFF_TICK_SHADER (4) /* 400-1600us */
+#else
+#define DEFAULT_PM_POWEROFF_TICK_SHADER (2) /* 400-800us */
+#endif
 
 /**
  * Default scheduling tick granuality

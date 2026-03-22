@@ -174,4 +174,25 @@ config WMK_PATCH_SCHEDUTIL_SCREEN_OFF_RATE_LIMIT
 	  Increase the schedutil up rate limit when the screen is off to
 	  reduce frequency spikes from background tasks.
 
+config WMK_PATCH_SCHEDTUNE_BOOST_HOLD
+	bool "WMK: Reduce SchedTune boost hold time to 10ms"
+	default n
+	help
+	  Reduce SCHEDTUNE_BOOST_HOLD_NS from 50ms to 10ms to allow frequency
+	  to drop faster after task bursts.
+
+config WMK_PATCH_MCDI_IDLE_WINDOW
+	bool "WMK: Reduce MCDI idle window to 100ms"
+	default n
+	help
+	  Reduce the all-CPU idle window from 500ms to 100ms to allow faster
+	  entry into deep idle states.
+
+config WMK_PATCH_MALI_SHADER_TIMEOUT
+	bool "WMK: Increase Mali shader power-off timeout"
+	default n
+	help
+	  Increase the shader core power-off tick from 2 (800us) to 4 (1.6ms)
+	  to reduce power-hungry thrashing.
+
 endmenu
