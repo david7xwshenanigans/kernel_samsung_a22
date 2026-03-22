@@ -8,6 +8,7 @@
 #include <linux/overflow.h>
 
 #ifdef COMPAT_NEED_REALLOCARRAY
+#ifndef reallocarray
 static inline void *reallocarray(void *ptr, size_t nmemb, size_t size)
 {
 	size_t bytes;
@@ -18,3 +19,5 @@ static inline void *reallocarray(void *ptr, size_t nmemb, size_t size)
 }
 #endif
 #endif
+
+#endif /* __TOOLS_LIBC_COMPAT_H */
