@@ -417,23 +417,29 @@ static unsigned int proTbl_v7[NR_FREQ * NR_MT_CPU_DVFS][ARRAY_COL_SIZE] = {
 
 };
 
+#ifdef CONFIG_WMK_PATCH_CPU_G75_UV_STEP
+#define WMK_CPU_G75_PVT_STEP	1
+#else
+#define WMK_CPU_G75_PVT_STEP	0
+#endif
+
 static unsigned int FY_G75Tbl[NR_FREQ * NR_MT_CPU_DVFS][ARRAY_COL_SIZE] = {
 	/* Freq, Vproc, post_div, clk_div */
 
 	/* L */
-	{ 1800, 80, 1, 1 },
-	{ 1625, 68, 2, 1 },
-	{ 1500, 62, 2, 1 },
-	{ 1450, 60, 2, 1 },
-	{ 1375, 56, 2, 1 },
-	{ 1325, 54, 2, 1 },
-	{ 1275, 52, 2, 1 },
-	{ 1175, 47, 2, 1 },
-	{ 1100, 43, 2, 1 },
-	{ 1050, 41, 2, 1 },
-	{ 999, 38, 2, 1 },
-	{ 950, 36, 2, 1 },
-	{ 900, 34, 2, 1 },
+	{ 1800, 81 - WMK_CPU_G75_PVT_STEP, 1, 1 },
+	{ 1625, 69 - WMK_CPU_G75_PVT_STEP, 2, 1 },
+	{ 1500, 63 - WMK_CPU_G75_PVT_STEP, 2, 1 },
+	{ 1450, 61 - WMK_CPU_G75_PVT_STEP, 2, 1 },
+	{ 1375, 57 - WMK_CPU_G75_PVT_STEP, 2, 1 },
+	{ 1325, 55 - WMK_CPU_G75_PVT_STEP, 2, 1 },
+	{ 1275, 53 - WMK_CPU_G75_PVT_STEP, 2, 1 },
+	{ 1175, 48 - WMK_CPU_G75_PVT_STEP, 2, 1 },
+	{ 1100, 44 - WMK_CPU_G75_PVT_STEP, 2, 1 },
+	{ 1050, 42 - WMK_CPU_G75_PVT_STEP, 2, 1 },
+	{ 999, 39 - WMK_CPU_G75_PVT_STEP, 2, 1 },
+	{ 950, 37 - WMK_CPU_G75_PVT_STEP, 2, 1 },
+	{ 900, 35 - WMK_CPU_G75_PVT_STEP, 2, 1 },
 	{ 850, 32, 4, 1 },
 	{ 774, 28, 4, 1 },
 	{ 500, 24, 4, 1 },
@@ -460,19 +466,19 @@ static unsigned int FY_G75Tbl[NR_FREQ * NR_MT_CPU_DVFS][ARRAY_COL_SIZE] = {
 
 
 	/* CCI */
-	{ 1277, 80, 2, 1 },
-	{ 1120, 63, 2, 1 },
-	{ 1049, 59, 2, 1 },
-	{ 1014, 57, 2, 1 },
-	{ 961, 53, 2, 1 },
-	{ 909, 50, 2, 1 },
-	{ 856, 47, 2, 1 },
-	{ 821, 44, 2, 1 },
-	{ 768, 41, 2, 1 },
-	{ 733, 39, 4, 1 },
-	{ 698, 36, 4, 1 },
-	{ 663, 34, 4, 1 },
-	{ 628, 32, 4, 1 },
+	{ 1277, 81 - WMK_CPU_G75_PVT_STEP, 2, 1 },
+	{ 1120, 64 - WMK_CPU_G75_PVT_STEP, 2, 1 },
+	{ 1049, 60 - WMK_CPU_G75_PVT_STEP, 2, 1 },
+	{ 1014, 58 - WMK_CPU_G75_PVT_STEP, 2, 1 },
+	{ 961, 54 - WMK_CPU_G75_PVT_STEP, 2, 1 },
+	{ 909, 51 - WMK_CPU_G75_PVT_STEP, 2, 1 },
+	{ 856, 48 - WMK_CPU_G75_PVT_STEP, 2, 1 },
+	{ 821, 45 - WMK_CPU_G75_PVT_STEP, 2, 1 },
+	{ 768, 42 - WMK_CPU_G75_PVT_STEP, 2, 1 },
+	{ 733, 40 - WMK_CPU_G75_PVT_STEP, 4, 1 },
+	{ 698, 37 - WMK_CPU_G75_PVT_STEP, 4, 1 },
+	{ 663, 35 - WMK_CPU_G75_PVT_STEP, 4, 1 },
+	{ 628, 33 - WMK_CPU_G75_PVT_STEP, 4, 1 },
 	{ 593, 31, 4, 1 },
 	{ 558, 28, 4, 1 },
 	{ 500, 24, 4, 1 },
