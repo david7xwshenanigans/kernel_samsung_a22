@@ -95,13 +95,19 @@ static DEFINE_SPINLOCK(mcdi_gov_spin_lock);
 
 static struct pm_qos_request mcdi_qos_request;
 
+#ifdef CONFIG_WMK_PATCH_MCDI_ALL_CPU_IDLE_THD
+#define WMK_MCDI_ALL_CPU_IDLE_THD	80
+#else
+#define WMK_MCDI_ALL_CPU_IDLE_THD	85
+#endif
+
 static struct all_cpu_idle all_cpu_idle_data = {
 	0,
 	0,
 	0,
 	0,
 	500000000, /* window     = 500 ms */
-	80         /* threshold >=  80  % */
+	WMK_MCDI_ALL_CPU_IDLE_THD
 };
 
 static DEFINE_SPINLOCK(all_cpu_idle_spin_lock);
