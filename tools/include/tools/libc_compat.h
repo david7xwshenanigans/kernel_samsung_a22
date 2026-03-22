@@ -8,7 +8,10 @@
 #include <linux/overflow.h>
 
 #ifdef COMPAT_NEED_REALLOCARRAY
-#ifndef reallocarray
+#if (defined(__GLIBC__) && (__GLIBC__ > 2 || (__GLIBC__ == 2 && __GLIBC_MINOR__ >= 26))) || \
+    defined(__BIONIC__)
+/* reallocarray is provided by libc */
+#elif !defined(reallocarray)
 static inline void *reallocarray(void *ptr, size_t nmemb, size_t size)
 {
 	size_t bytes;
