@@ -8696,6 +8696,16 @@ wakeup_gran(struct sched_entity *curr, struct sched_entity *se)
 {
 	unsigned long gran = sysctl_sched_wakeup_granularity;
 
+#ifdef CONFIG_WMK_PATCH_SCHED_CFS_WAKEUP_PREEMPT_TUNE
+	/*
+	 * If the waking task belongs to a boosted cgroup (e.g. top-app),
+	 * halve the granularity so it preempts background work faster.
+	 */
+	if (entity_is_task(se) &&
+	    schedtune_task_boost(task_of(se)) > 0)
+		gran >>= 1;
+#endif
+
 	/*
 	 * Since its curr running now, convert the gran from real-time
 	 * to virtual-time in his units.

@@ -296,4 +296,14 @@ config WMK_PATCH_THERMAL_POLLING_RELAX
 	  use. Above 65C, the default polling rate is preserved to
 	  ensure fast thermal response.
 
+config WMK_PATCH_SCHED_CFS_WAKEUP_PREEMPT_TUNE
+	bool "WMK: Tune CFS wakeup preemption for responsiveness"
+	default n
+	---help---
+	  Halves the wakeup preemption granularity for tasks with a
+	  positive SchedTune boost (e.g. top-app cgroup). This allows
+	  interactive tasks to preempt background work more quickly,
+	  reducing perceived touch latency. Has no effect on non-boosted
+	  tasks.
+
 endmenu
