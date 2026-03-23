@@ -76,8 +76,7 @@ static inline bool mmc_card_hs400es(struct mmc_card *card)
 
 static inline bool mmc_host_use_blk_mq(struct mmc_host *host)
 {
-	return true;
+	return host->use_blk_mq;
 }
 
 #endif
-

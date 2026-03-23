@@ -569,7 +569,8 @@ int mmc_init_queue(struct mmc_queue *mq, struct mmc_card *card,
 
 #if defined(CONFIG_MTK_EMMC_CQ_SUPPORT) || defined(CONFIG_MTK_EMMC_HW_CQ)
 	if (card->ext_csd.cmdq_support &&
-		(area_type == MMC_BLK_DATA_AREA_MAIN)) {
+		(area_type == MMC_BLK_DATA_AREA_MAIN) &&
+		!mmc_host_use_blk_mq(host)) {
 #ifdef CONFIG_MTK_EMMC_HW_CQ
 		/* for cqe */
 		if (host->caps2 & MMC_CAP2_CQE) {

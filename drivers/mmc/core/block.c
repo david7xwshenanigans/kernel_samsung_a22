@@ -108,11 +108,14 @@ static struct mmc_cmdq_req *mmc_cmdq_prep_dcmd(
 
 static DEFINE_MUTEX(block_mutex);
 
-/*
- * The defaults come from config options but can be overriden by module
- * or bootarg options.
- */
 static int perdev_minors = CONFIG_MMC_BLOCK_MINORS;
+
+/*
+ * use_blk_mq: use blk-mq relevant infrastructure by default
+ */
+static bool use_blk_mq = IS_ENABLED(CONFIG_MMC_MQ_DEFAULT);
+module_param(use_blk_mq, bool, 0644);
+MODULE_PARM_DESC(use_blk_mq, "Use block multiqueue for MMC devices");
 
 /*
  * We've only got one major, so number of mmcblk devices is
@@ -5518,6 +5521,7 @@ static int mmc_blk_probe(struct mmc_card *card)
 
 	mmc_fixup_device(card, mmc_blk_fixups);
 
+	card->host->use_blk_mq = use_blk_mq;
 	md = mmc_blk_alloc(card);
 	if (IS_ERR(md))
 		return PTR_ERR(md);

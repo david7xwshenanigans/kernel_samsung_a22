@@ -43,6 +43,18 @@ config MMC_BLOCK
 	  mount the filesystem. Almost everyone wishing MMC support
 	  should say Y or M here.
 
+config MMC_MQ_DEFAULT
+	bool "MMC: use blk-mq relevant infrastructure by default"
+	depends on MMC_BLOCK
+	default n
+	help
+	  This option enables blk-mq by default for the MMC subsystem.
+	  The block layer multi-queue (blk-mq) infrastructure improves
+	  performance on multi-core systems by reducing contention.
+
+	  If unsure, say N.
+
+
 config MMC_BLOCK_MINORS
 	int "Number of minors per block device"
 	depends on MMC_BLOCK

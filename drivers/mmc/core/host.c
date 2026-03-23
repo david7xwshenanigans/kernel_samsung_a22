@@ -369,6 +369,7 @@ struct mmc_host *mmc_alloc_host(int extra, struct device *dev)
 
 	host->index = err;
 
+	host->use_blk_mq = IS_ENABLED(CONFIG_MMC_MQ_DEFAULT);
 	dev_set_name(&host->class_dev, "mmc%d", host->index);
 
 	host->parent = dev;
