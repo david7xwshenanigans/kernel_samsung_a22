@@ -660,8 +660,8 @@ void mmc_cmd_dump(char **buff, unsigned long *size, struct seq_file *m,
 	SPREAD_PRINTF(buff, size, m,
 		"claimed(%d), claim_cnt(%d), claimer pid(%d), comm %s\n",
 		mmc->claimed, mmc->claim_cnt,
-		mmc->claimer ? mmc->claimer->pid : 0,
-		mmc->claimer ? mmc->claimer->comm : "NULL");
+		mmc->claimer ? mmc->claimer->task->pid : 0,
+		mmc->claimer ? mmc->claimer->task->comm : "NULL");
 }
 
 void sd_cmd_dump(char **buff, unsigned long *size, struct seq_file *m,
@@ -706,8 +706,8 @@ void sd_cmd_dump(char **buff, unsigned long *size, struct seq_file *m,
 	SPREAD_PRINTF(buff, size, m,
 		"claimed(%d), claim_cnt(%d), claimer pid(%d), comm %s\n",
 		mmc->claimed, mmc->claim_cnt,
-		mmc->claimer ? mmc->claimer->pid : 0,
-		mmc->claimer ? mmc->claimer->comm : "NULL");
+		mmc->claimer ? mmc->claimer->task->pid : 0,
+		mmc->claimer ? mmc->claimer->task->comm : "NULL");
 }
 
 void msdc_dump_host_state(char **buff, unsigned long *size,
@@ -882,9 +882,9 @@ void msdc_cmdq_status_print(struct msdc_host *host, struct seq_file *m)
 	seq_printf(m, "host claim cnt : %d\n",
 		mmc->claim_cnt);
 	seq_printf(m, "host claimer pid : %d\n",
-		mmc->claimer ? mmc->claimer->pid : 0);
+		mmc->claimer ? mmc->claimer->task->pid : 0);
 	seq_printf(m, "host claimer comm : %s\n",
-		mmc->claimer ? mmc->claimer->comm : "NULL");
+		mmc->claimer ? mmc->claimer->task->comm : "NULL");
 
 
 #if defined(CONFIG_MTK_EMMC_HW_CQ)
@@ -1457,7 +1457,7 @@ static int multi_rw_compare_core(int host_num, int read, uint address,
 
 	mmc = host_ctl->mmc;
 
-	mmc_get_card(mmc->card);
+	mmc_get_card(mmc->card, NULL);
 
 #if defined(CONFIG_MTK_EMMC_CQ_SUPPORT) || defined(CONFIG_MTK_EMMC_HW_CQ)
 	cmdq_en = !!mmc_card_cmdq(mmc->card);
@@ -1467,7 +1467,7 @@ static int multi_rw_compare_core(int host_num, int read, uint address,
 		ret = mmc_cmdq_disable(host_ctl->mmc->card);
 		if (ret) {
 			pr_notice("[MSDC_DBG] turn off cmdq en failed\n");
-			mmc_put_card(host_ctl->mmc->card);
+			mmc_put_card(host_ctl->mmc->card, NULL);
 			result = -1;
 			goto free;
 		}
@@ -1554,7 +1554,7 @@ skip_check:
 	}
 #endif
 
-	mmc_put_card(host_ctl->mmc->card);
+	mmc_put_card(host_ctl->mmc->card, NULL);
 
 	if (msdc_cmd.error)
 		result = msdc_cmd.error;
@@ -2145,7 +2145,7 @@ static void msdc_enable_emmc_cache(struct seq_file *m,
 
 	card = host->mmc->card;
 
-	(void)mmc_get_card(card);
+	(void)mmc_get_card(card, NULL);
 
 	c_ctrl = card->ext_csd.cache_ctrl;
 
@@ -2161,7 +2161,7 @@ static void msdc_enable_emmc_cache(struct seq_file *m,
 			seq_printf(m, "msdc%d: %s cache successfully\n",
 				host->id, enable ? "enable" : "disable");
 	}
-	mmc_put_card(card);
+	mmc_put_card(card, NULL);
 }
 
 #ifdef MTK_MSDC_ERROR_TUNE_DEBUG
@@ -2633,9 +2633,9 @@ static int msdc_debug_proc_show(struct seq_file *m, void *v)
 			goto invalid_host_id;
 		host = mtk_msdc_host[id];
 		if (p1 == 1) {
-			mmc_get_card(host->mmc->card);
+			mmc_get_card(host->mmc->card, NULL);
 			msdc_set_host_mode_speed(m, host->mmc, spd_mode);
-			mmc_put_card(host->mmc->card);
+			mmc_put_card(host->mmc->card, NULL);
 		}
 		msdc_get_host_mode_speed(m, host->mmc);
 	} else if (cmd == SD_TOOL_DMA_STATUS) {
@@ -3031,7 +3031,7 @@ static int msdc_ext_csd_show(struct seq_file *m, void *v)
 		return 0;
 
 	card = host->mmc->card;
-	mmc_get_card(card);
+	mmc_get_card(card, NULL);
 
 #if defined(CONFIG_MTK_EMMC_CQ_SUPPORT) || defined(CONFIG_MTK_EMMC_HW_CQ)
 	cmdq_en = !!mmc_card_cmdq(card);
@@ -3041,7 +3041,7 @@ static int msdc_ext_csd_show(struct seq_file *m, void *v)
 		ret = mmc_cmdq_disable(card);
 		if (ret) {
 			pr_notice("[%s] turn off cmdq en failed\n", __func__);
-			mmc_put_card(card);
+			mmc_put_card(card, NULL);
 			return 0;
 		}
 	}
@@ -3058,7 +3058,7 @@ static int msdc_ext_csd_show(struct seq_file *m, void *v)
 	}
 #endif
 
-	mmc_put_card(card);
+	mmc_put_card(card, NULL);
 	if (err) {
 		pr_notice("[%s ]mmc_get_ext_csd failed!\n", __func__);
 		kfree(ext_csd);

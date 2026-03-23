@@ -89,13 +89,13 @@ int msdc_reinit(struct msdc_host *host)
 	if (!(host->mmc->caps & MMC_CAP_NONREMOVABLE)
 	 || (host->block_bad_card != 0))
 		goto skip_reinit1;
-	mmc_get_card(card);
+	mmc_get_card(card, NULL);
 	mmc->ios.timing = MMC_TIMING_LEGACY;
 	msdc_ops_set_ios(mmc, &mmc->ios);
 	/* FIX ME, check if bus_ops->reset() shall be un-commented */
 	/* power reset sdcard */
 	/* ret = mmc->bus_ops->reset(mmc); */
-	mmc_put_card(card);
+	mmc_put_card(card, NULL);
 
 	ERR_MSG("Reinit %s", ret == 0 ? "success" : "fail");
 
@@ -161,7 +161,7 @@ static int simple_sd_ioctl_set_bootpart(struct msdc_ioctl *msdc_ctl)
 	if (msdc_ctl->buffer == NULL)
 		return -EINVAL;
 
-	mmc_get_card(mmc->card);
+	mmc_get_card(mmc->card, NULL);
 
 #ifdef CONFIG_MTK_EMMC_HW_CQ
 	(void)mmc_cmdq_disable(mmc->card);
@@ -211,7 +211,7 @@ end:
 #ifdef CONFIG_MTK_EMMC_HW_CQ
 	(void)mmc_cmdq_enable(mmc->card);
 #endif
-	mmc_put_card(mmc->card);
+	mmc_put_card(mmc->card, NULL);
 
 	kfree(l_buf);
 	return ret;
@@ -282,7 +282,7 @@ int simple_sd_ioctl_rw(struct msdc_ioctl *msdc_ctl)
 	} else {
 		memset(sg_msdc_multi_buffer, 0, total_size);
 	}
-	mmc_get_card(mmc->card);
+	mmc_get_card(mmc->card, NULL);
 
 	MMC_IOCTL_PR_DBG("user want access %d partition\n",
 		msdc_ctl->partition);
@@ -421,7 +421,7 @@ skip_sbc_prepare:
 	}
 #endif
 
-	mmc_put_card(mmc->card);
+	mmc_put_card(mmc->card, NULL);
 	if (!msdc_ctl->iswrite) {
 		if (msdc_ctl->opcode != MSDC_CARD_DUNM_FUNC) {
 			if (copy_to_user(msdc_ctl->buffer, sg_msdc_multi_buffer,
@@ -452,7 +452,7 @@ rw_end:
 			is_cmdq_en = false;
 	}
 #endif
-	mmc_put_card(mmc->card);
+	mmc_put_card(mmc->card, NULL);
 
 rw_end_without_release:
 	if (ret)
@@ -542,7 +542,7 @@ static int simple_sd_ioctl_get_bootpart(struct msdc_ioctl *msdc_ctl)
 	if (get_user(user_buffer, msdc_ctl->buffer))
 		return -EINVAL;
 
-	mmc_get_card(mmc->card);
+	mmc_get_card(mmc->card, NULL);
 
 #ifdef CONFIG_MTK_EMMC_HW_CQ
 		(void)mmc_cmdq_disable(mmc->card);
@@ -578,7 +578,7 @@ end:
 		(void)mmc_cmdq_enable(mmc->card);
 #endif
 
-	mmc_put_card(mmc->card);
+	mmc_put_card(mmc->card, NULL);
 
 	kfree(l_buf);
 
@@ -601,7 +601,7 @@ static int simple_sd_ioctl_get_partition_size(struct msdc_ioctl *msdc_ctl)
 
 	mmc = host_ctl->mmc;
 
-	mmc_get_card(mmc->card);
+	mmc_get_card(mmc->card, NULL);
 
 	MMC_IOCTL_PR_DBG("get size of partition=%d\n", msdc_ctl->partition);
 
@@ -631,7 +631,7 @@ static int simple_sd_ioctl_get_partition_size(struct msdc_ioctl *msdc_ctl)
 
 	msdc_ctl->result = ret;
 
-	mmc_put_card(mmc->card);
+	mmc_put_card(mmc->card, NULL);
 
 	return ret;
 }
@@ -738,7 +738,7 @@ static int simple_mmc_erase_func(unsigned int start, unsigned int size)
 	}
 	mmc = host->mmc;
 
-	mmc_get_card(mmc->card);
+	mmc_get_card(mmc->card, NULL);
 
 #ifdef CONFIG_MTK_EMMC_HW_CQ
 		(void)mmc_cmdq_disable(mmc->card);
@@ -771,7 +771,7 @@ end:
 		(void)mmc_cmdq_disable(mmc->card);
 #endif
 
-	mmc_put_card(mmc->card);
+	mmc_put_card(mmc->card, NULL);
 
 	return 0;
 }
@@ -801,7 +801,7 @@ static int simple_sd_ioctl_erase_selected_area(struct msdc_ioctl *msdc_ctl)
 
 	mmc = host_ctl->mmc;
 
-	mmc_get_card(mmc->card);
+	mmc_get_card(mmc->card, NULL);
 
 #ifdef CONFIG_MTK_EMMC_HW_CQ
 		(void)mmc_cmdq_disable(mmc->card);
@@ -845,7 +845,7 @@ out:
 		(void)mmc_cmdq_enable(mmc->card);
 #endif
 
-	mmc_put_card(mmc->card);
+	mmc_put_card(mmc->card, NULL);
 
 	msdc_ctl->result = err;
 
