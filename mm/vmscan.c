@@ -16,7 +16,7 @@
 
 #include <linux/mm.h>
 #include <linux/sched/mm.h>
-#include <linux/sched/tune.h>
+
 #include <linux/module.h>
 #include <linux/gfp.h>
 #include <linux/kernel_stat.h>
@@ -2586,6 +2586,7 @@ static void get_scan_count(struct lruvec *lruvec, struct mem_cgroup *memcg,
 	 * scale back swappiness to favor dropping pagecache over swapping.
 	 * This modifies a stack variable and is inherently race-free.
 	 */
+	extern int schedtune_task_boost(struct task_struct *tsk);
 	if (!current_is_kswapd() && schedtune_task_boost(current) > 10)
 		swappiness >>= 2;
 #endif
