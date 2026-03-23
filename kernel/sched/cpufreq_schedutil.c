@@ -351,14 +351,16 @@ static void sugov_iowait_boost(struct sugov_cpu *sg_cpu, u64 time,
 
 		if (sg_cpu->iowait_boost > max_boost)
 			sg_cpu->iowait_boost = max_boost;
-	} else if (sg_cpu->iowait_boost) {
-		s64 delta_ns = time - sg_cpu->last_update;
-
-		/* Clear iowait_boost if the CPU appears to have been idle. */
-		if (delta_ns > TICK_NSEC) {
-			sg_cpu->iowait_boost = 0;
+	} else {
+		/*
+		 * The first time we're explicitly told the CPU is free of iowait
+		 * tasks, we let the boost value decay, then we explicitly
+		 * clear it.
+		 */
+		if (sg_cpu->iowait_boost_pending)
 			sg_cpu->iowait_boost_pending = false;
-		}
+		else
+			sg_cpu->iowait_boost = 0;
 	}
 }
 
