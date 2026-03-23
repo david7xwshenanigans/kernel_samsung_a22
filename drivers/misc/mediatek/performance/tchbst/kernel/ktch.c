@@ -20,6 +20,8 @@
 #include <linux/slab.h>
 #include <linux/kthread.h>
 #include <linux/input.h>
+#include <linux/jiffies.h>
+#include <linux/workqueue.h>
 
 #include "tchbst.h"
 #include "boost_ctrl.h"
@@ -33,6 +35,8 @@
 #ifdef CONFIG_WMK_PATCH_TOUCH_BOOST_OPTIMIZE
 /* VENDOR FIX: reduce touch boost from 1183MHz to 900MHz for power savings */
 #define TARGET_FREQ (900000)
+#define TOUCH_SUSTAIN_FREQ (650000)
+#define TOUCH_SUSTAIN_DELAY_MS (80)
 #else
 #define TARGET_FREQ (1183000)
 #endif
@@ -41,6 +45,10 @@ struct boost {
 	spinlock_t touch_lock;
 	wait_queue_head_t wq;
 	struct task_struct *thread;
+#ifdef CONFIG_WMK_PATCH_TOUCH_BOOST_OPTIMIZE
+	struct delayed_work decay_work;
+	bool touch_active;
+#endif
 	int touch_event;
 	atomic_t event;
 };
@@ -84,6 +92,29 @@ void set_freq(int enable, int core, int freq)
 			perfmgr_clusters, freq_to_set);
 }
 
+#ifdef CONFIG_WMK_PATCH_TOUCH_BOOST_OPTIMIZE
+static void ktch_boost_decay_work(struct work_struct *work)
+{
+	struct boost *boost = container_of(to_delayed_work(work),
+					   struct boost, decay_work);
+	unsigned long flags;
+	int core, freq;
+	bool touch_active;
+
+	spin_lock_irqsave(&boost->touch_lock, flags);
+	touch_active = boost->touch_active;
+	core = ktch_mgr_core;
+	freq = min(ktch_mgr_freq, TOUCH_SUSTAIN_FREQ);
+	spin_unlock_irqrestore(&boost->touch_lock, flags);
+
+	if (!touch_active)
+		return;
+
+	/* VENDOR FIX: decay the floor during long gestures to cut active power */
+	set_freq(1, core, freq);
+}
+#endif
+
 static int ktchboost_thread(void *ptr)
 {
 	int event, core, freq;
@@ -101,9 +132,23 @@ static int ktchboost_thread(void *ptr)
 		event = ktchboost.touch_event;
 		core = ktch_mgr_core;
 		freq = ktch_mgr_freq;
+#ifdef CONFIG_WMK_PATCH_TOUCH_BOOST_OPTIMIZE
+		ktchboost.touch_active = !!event;
+#endif
 		spin_unlock_irqrestore(&ktchboost.touch_lock, flags);
 		pr_debug("%s\n", __func__);
+#ifdef CONFIG_WMK_PATCH_TOUCH_BOOST_OPTIMIZE
+		cancel_delayed_work_sync(&ktchboost.decay_work);
+		if (event) {
+			set_freq(1, core, freq);
+			schedule_delayed_work(&ktchboost.decay_work,
+				msecs_to_jiffies(TOUCH_SUSTAIN_DELAY_MS));
+		} else {
+			set_freq(0, core, freq);
+		}
+#else
 		set_freq(event, core, freq);
+#endif
 
 	}
 	return 0;
@@ -385,6 +430,9 @@ int init_ktch(struct proc_dir_entry *parent)
 	spin_lock_init(&ktchboost.touch_lock);
 	init_waitqueue_head(&ktchboost.wq);
 	atomic_set(&ktchboost.event, 0);
+#ifdef CONFIG_WMK_PATCH_TOUCH_BOOST_OPTIMIZE
+	INIT_DELAYED_WORK(&ktchboost.decay_work, ktch_boost_decay_work);
+#endif
 	ktchboost.thread = (struct task_struct *)kthread_run(ktchboost_thread,
 			&ktchboost, "touch_boost");
 	if (IS_ERR(ktchboost.thread))
@@ -399,6 +447,10 @@ int ktch_suspend(void)
 {
 	/*pr_debug(TAG"perfmgr_touch_suspend\n");*/
 
+#ifdef CONFIG_WMK_PATCH_TOUCH_BOOST_OPTIMIZE
+	cancel_delayed_work_sync(&ktchboost.decay_work);
+	ktchboost.touch_active = false;
+#endif
 	set_freq(0, 0, 0);
 
 	return 0;
