@@ -278,12 +278,22 @@ config WMK_PATCH_MALI_R54P2_DEFER_POWER_DOWN
 	  re-initializations during rapid sleep/wake cycles.
 
 config WMK_PATCH_TOUCH_BOOST_OPTIMIZE
-zibool "WMK: Reduce touch boost target from 1183MHz to 900MHz"
-zidefault n
-zi---help---
-zi  Lowers the CPU frequency target set on every touch event from
-zi  1183MHz to 900MHz. The stock value causes unnecessary voltage
-zi  and frequency spikes during scrolling and tapping. 900MHz
-zi  provides adequate responsiveness while reducing active power.
+	bool "WMK: Reduce touch boost target from 1183MHz to 900MHz"
+	default n
+	---help---
+	  Lowers the CPU frequency target set on every touch event from
+	  1183MHz to 900MHz. The stock value causes unnecessary voltage
+	  and frequency spikes during scrolling and tapping. 900MHz
+	  provides adequate responsiveness while reducing active power.
+
+config WMK_PATCH_THERMAL_POLLING_RELAX
+	bool "WMK: Relax thermal polling to 500ms below 65C"
+	default n
+	---help---
+	  When the thermal zone temperature is safely below 65C, the
+	  polling interval is relaxed to 500ms instead of the stock
+	  250ms. This reduces CPU wakeup overhead during normal active
+	  use. Above 65C, the default polling rate is preserved to
+	  ensure fast thermal response.
 
 endmenu

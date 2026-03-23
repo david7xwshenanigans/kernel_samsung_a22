@@ -314,9 +314,23 @@ static void monitor_thermal_zone(struct thermal_zone_device *tz)
 
 	if (tz->passive)
 		thermal_zone_device_set_polling(tz, tz->passive_delay);
-	else if (tz->polling_delay)
+	else if (tz->polling_delay) {
+#ifdef CONFIG_WMK_PATCH_THERMAL_POLLING_RELAX
+		/*
+		 * VENDOR FIX: relax polling to 500ms when temperature is
+		 * safely below 65C to reduce CPU wakeup overhead. Above
+		 * 65C, fall back to the default polling delay to ensure
+		 * fast thermal response.
+		 */
+		int relaxed_delay = tz->polling_delay;
+
+		if (tz->temperature < 65000 && tz->polling_delay < 500)
+			relaxed_delay = 500;
+		thermal_zone_device_set_polling(tz, relaxed_delay);
+#else
 		thermal_zone_device_set_polling(tz, tz->polling_delay);
-	else
+#endif
+	} else
 		thermal_zone_device_set_polling(tz, 0);
 
 	mutex_unlock(&tz->lock);
