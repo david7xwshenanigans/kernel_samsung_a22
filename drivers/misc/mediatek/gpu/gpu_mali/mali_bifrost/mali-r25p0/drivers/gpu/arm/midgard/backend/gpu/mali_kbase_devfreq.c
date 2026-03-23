@@ -117,12 +117,16 @@ static void opp_translate(struct kbase_device *kbdev, unsigned long freq,
 	}
 
 	/* If failed to find OPP, return all cores enabled
-	 * and nominal frequency
+	 * and nominal frequency with the corresponding voltage.
 	 */
 	if (i == kbdev->num_opps) {
+		unsigned long voltage = get_voltage(kbdev, freq);
+
 		*core_mask = kbdev->gpu_props.props.raw_props.shader_present;
-		for (i = 0; i < kbdev->nr_clocks; i++)
+		for (i = 0; i < kbdev->nr_clocks; i++) {
 			freqs[i] = freq;
+			volts[i] = voltage;
+		}
 	}
 }
 
@@ -133,6 +137,9 @@ kbase_devfreq_target(struct device *dev, unsigned long *target_freq, u32 flags)
 	struct dev_pm_opp *opp;
 	unsigned long nominal_freq;
 	unsigned long freqs[BASE_MAX_NR_CLOCKS_REGULATORS] = {0};
+#ifdef CONFIG_REGULATOR
+	unsigned long original_freqs[BASE_MAX_NR_CLOCKS_REGULATORS] = {0};
+#endif
 	unsigned long volts[BASE_MAX_NR_CLOCKS_REGULATORS] = {0};
 	unsigned int i;
 	u64 core_mask;
@@ -203,6 +210,9 @@ kbase_devfreq_target(struct device *dev, unsigned long *target_freq, u32 flags)
 
 			err = clk_set_rate(kbdev->clocks[i], freqs[i]);
 			if (!err) {
+#ifdef CONFIG_REGULATOR
+				original_freqs[i] = kbdev->current_freqs[i];
+#endif
 				kbdev->current_freqs[i] = freqs[i];
 			} else {
 				dev_err(dev, "Failed to set clock %lu (target %lu)\n",
@@ -212,11 +222,13 @@ kbase_devfreq_target(struct device *dev, unsigned long *target_freq, u32 flags)
 		}
 	}
 
+	kbase_devfreq_set_core_mask(kbdev, core_mask);
+
 #ifdef CONFIG_REGULATOR
 	for (i = 0; i < kbdev->nr_clocks; i++) {
 		if (kbdev->regulators[i] &&
 				kbdev->current_voltages[i] != volts[i] &&
-				kbdev->current_freqs[i] > freqs[i]) {
+				original_freqs[i] > freqs[i]) {
 			int err;
 
 			err = regulator_set_voltage(kbdev->regulators[i],
@@ -231,8 +243,6 @@ kbase_devfreq_target(struct device *dev, unsigned long *target_freq, u32 flags)
 		}
 	}
 #endif
-
-	kbase_devfreq_set_core_mask(kbdev, core_mask);
 
 	*target_freq = nominal_freq;
 	kbdev->current_nominal_freq = nominal_freq;
