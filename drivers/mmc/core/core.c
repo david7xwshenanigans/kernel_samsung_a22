@@ -231,8 +231,7 @@ static void mmc_discard_cmdq(struct mmc_host *host)
 	pr_notice("%s: CMDQ send distard (CMD48)\n", __func__);
 }
 
-static void mmc_post_req(struct mmc_host *host, struct mmc_request *mrq,
-	int err);
+
 
 /* add for emmc reset when error happen */
 int emmc_resetting_when_cmdq;
@@ -1183,7 +1182,7 @@ static int mmc_mrq_prep(struct mmc_host *host, struct mmc_request *mrq)
 	return 0;
 }
 
-static int mmc_start_request(struct mmc_host *host, struct mmc_request *mrq)
+int mmc_start_request(struct mmc_host *host, struct mmc_request *mrq)
 {
 	int err;
 
@@ -1232,6 +1231,7 @@ static int mmc_start_request(struct mmc_host *host, struct mmc_request *mrq)
 
 	return 0;
 }
+EXPORT_SYMBOL_GPL(mmc_start_request);
 
 #ifdef CONFIG_MTK_EMMC_HW_CQ
 static int mmc_start_cmdq_request(struct mmc_host *host,
@@ -1436,11 +1436,12 @@ EXPORT_SYMBOL(mmc_is_req_done);
  *	host prepare for the new request. Preparation of a request may be
  *	performed while another request is running on the host.
  */
-static void mmc_pre_req(struct mmc_host *host, struct mmc_request *mrq)
+void mmc_pre_req(struct mmc_host *host, struct mmc_request *mrq)
 {
 	if (host->ops->pre_req)
 		host->ops->pre_req(host, mrq);
 }
+EXPORT_SYMBOL_GPL(mmc_pre_req);
 
 /**
  *	mmc_post_req - Post process a completed request
@@ -1451,12 +1452,24 @@ static void mmc_pre_req(struct mmc_host *host, struct mmc_request *mrq)
  *	Let the host post process a completed request. Post processing of
  *	a request may be performed while another reuqest is running.
  */
-static void mmc_post_req(struct mmc_host *host, struct mmc_request *mrq,
+void mmc_post_req(struct mmc_host *host, struct mmc_request *mrq,
 			 int err)
 {
 	if (host->ops->post_req)
 		host->ops->post_req(host, mrq, err);
 }
+EXPORT_SYMBOL_GPL(mmc_post_req);
+
+int mmc_cqe_recovery(struct mmc_host *host)
+{
+	if (host->cqe_ops && host->cqe_ops->cqe_recovery_start) {
+		host->cqe_ops->cqe_recovery_start(host);
+		host->cqe_ops->cqe_recovery_finish(host);
+		return 0;
+	}
+	return -EOPNOTSUPP;
+}
+EXPORT_SYMBOL(mmc_cqe_recovery);
 
 #ifdef CONFIG_MTK_EMMC_HW_CQ
 /**

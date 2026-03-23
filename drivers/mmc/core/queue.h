@@ -58,6 +58,7 @@ struct mmc_blk_request {
 	struct mmc_command	cmd;
 	struct mmc_command	stop;
 	struct mmc_data		data;
+	bool			retune_retry_done;
 };
 
 /**
