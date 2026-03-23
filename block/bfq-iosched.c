@@ -148,13 +148,21 @@ static const int bfq_back_max = 16 * 1024;
 static const int bfq_back_penalty = 2;
 
 /* Idling period duration, in ns. */
+#ifdef CONFIG_WMK_PATCH_BFQ_TUNING
+static u64 bfq_slice_idle = NSEC_PER_SEC / 1000;
+#else
 static u64 bfq_slice_idle = NSEC_PER_SEC / 125;
+#endif
 
 /* Minimum number of assigned budgets for which stats are safe to compute. */
 static const int bfq_stats_min_budgets = 194;
 
 /* Default maximum budget values, in sectors and number of requests. */
+#ifdef CONFIG_WMK_PATCH_BFQ_TUNING
+static const int bfq_default_max_budget = 32 * 1024;
+#else
 static const int bfq_default_max_budget = 16 * 1024;
+#endif
 
 /*
  * Async to sync throughput distribution is controlled as follows:
@@ -3336,6 +3344,17 @@ static bool bfq_bfqq_may_idle(struct bfq_queue *bfqq)
 	asymmetric_scenario = (bfqq->wr_coeff > 1 &&
 			       bfqd->wr_busy_queues < bfqd->busy_queues) ||
 		!bfq_symmetric_scenario(bfqd);
+
+	/*
+	 * If the device is fast non-rotational and has hardware
+	 * queueing, then idling is never needed for service
+	 * guarantees, because the device itself will likely
+	 * preserve them, and we don't want to sacrifice
+	 * throughput.
+	 */
+	if (IS_ENABLED(CONFIG_WMK_PATCH_BFQ_TUNING) &&
+	    blk_queue_nonrot(bfqd->queue) && bfqd->hw_tag)
+		asymmetric_scenario = false;
 
 	/*
 	 * Finally, there is a case where maximizing throughput is the

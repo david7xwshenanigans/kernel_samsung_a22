@@ -116,6 +116,15 @@ config BFQ_GROUP_IOSCHED
        Enable hierarchical scheduling in BFQ, using the blkio
        (cgroups-v1) or io (cgroups-v2) controller.
 
+config WMK_PATCH_BFQ_TUNING
+	bool "WMK: tune BFQ for fast tagged storage"
+	depends on IOSCHED_BFQ
+	default n
+	help
+	  Enable WMK-specific BFQ tuning for fast non-rotational devices with
+	  hardware tagging. This keeps the stock BFQ behavior available when
+	  the option is disabled.
+
 endmenu
 
 endif
