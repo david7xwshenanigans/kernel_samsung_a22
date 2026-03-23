@@ -70,34 +70,7 @@ static enum mmc_issue_type mmc_cqe_issue_type(struct mmc_host *host,
 	}
 }
 
-static inline bool mmc_cqe_dcmd_busy(struct mmc_queue *mq)
-{
-	/* Allow only 1 DCMD at a time */
-	return mq->in_flight[MMC_ISSUE_DCMD];
-}
 
-void mmc_cqe_check_busy(struct mmc_queue *mq)
-{
-	if ((mq->cqe_busy & MMC_CQE_DCMD_BUSY) && !mmc_cqe_dcmd_busy(mq))
-		mq->cqe_busy &= ~MMC_CQE_DCMD_BUSY;
-
-	mq->cqe_busy &= ~MMC_CQE_QUEUE_FULL;
-}
-
-static inline bool mmc_cqe_can_dcmd(struct mmc_host *host)
-{
-	return host->caps2 & MMC_CAP2_CQE_DCMD;
-}
-
-static enum mmc_issue_type mmc_cqe_issue_type(struct mmc_host *host,
-					      struct request *req)
-{
-	switch (req_op(req)) {
-	case REQ_OP_DRV_IN:
-	case REQ_OP_DRV_OUT:
-	case REQ_OP_DISCARD:
-	case REQ_OP_SECURE_ERASE:
-		return MMC_ISSUE_SYNC;
 	case REQ_OP_FLUSH:
 		return mmc_cqe_can_dcmd(host) ? MMC_ISSUE_DCMD : MMC_ISSUE_SYNC;
 	default:
@@ -161,6 +134,7 @@ static struct request *mmc_peek_request(struct mmc_queue *mq)
 
 	return mq->cmdq_req_peeked;
 }
+#endif
 
 static void mmc_mq_recovery_handler(struct work_struct *work)
 {
@@ -638,33 +612,7 @@ int mmc_init_queue(struct mmc_queue *mq, struct mmc_card *card,
 
 static void mmc_mq_queue_suspend(struct mmc_queue *mq)
 {
-	if (mq->queue->mq_ops) {
-		blk_mq_quiesce_queue(mq->queue);
-		return;
-	}
-
-	/* Make sure the queue isn't suspended, as that will deadlock */
-	mmc_queue_resume(mq);
-
-	/* Then terminate our worker thread */
-	kthread_stop(mq->thread);
-
-#ifdef CONFIG_LARGE_DIRTY_BUFFER
-	/* Restore bdi min/max ratio before device removal */
-	bdi_set_min_ratio(q->backing_dev_info, 0);
-	bdi_set_max_ratio(q->backing_dev_info, 100);
-#endif
-
-	/* Empty the queue */
-	spin_lock_irqsave(q->queue_lock, flags);
-	q->queuedata = NULL;
-	blk_start_queue(q);
-	spin_unlock_irqrestore(q->queue_lock, flags);
-
-	if (likely(!blk_queue_dead(q)))
-		blk_cleanup_queue(q);
-
-	mq->card = NULL;
+	blk_mq_quiesce_queue(mq->queue);
 }
 
 static void mmc_mq_queue_resume(struct mmc_queue *mq)
@@ -672,7 +620,7 @@ static void mmc_mq_queue_resume(struct mmc_queue *mq)
 	blk_mq_unquiesce_queue(mq->queue);
 }
 
-void mmc_queue_suspend(struct mmc_queue *mq)
+int mmc_queue_suspend(struct mmc_queue *mq, int wait)
 {
 	blk_mq_quiesce_queue(mq->queue);
 
@@ -682,6 +630,27 @@ void mmc_queue_suspend(struct mmc_queue *mq)
 	 */
 	mmc_claim_host(mq->card->host);
 	mmc_release_host(mq->card->host);
+
+	return 0;
+}
+
+void mmc_cleanup_queue(struct mmc_queue *mq)
+{
+	struct request_queue *q = mq->queue;
+
+	if (blk_queue_quiesced(q))
+		blk_mq_unquiesce_queue(q);
+
+	blk_cleanup_queue(q);
+
+	/*
+	 * A request can be completed before the next request, potentially
+	 * leaving a complete_work with nothing to do. Such a work item might
+	 * still be queued at this point. Flush it.
+	 */
+	flush_work(&mq->complete_work);
+
+	mq->card = NULL;
 }
 EXPORT_SYMBOL(mmc_cleanup_queue);
 

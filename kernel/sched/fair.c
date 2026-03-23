@@ -6810,7 +6810,7 @@ static inline int select_energy_cpu_idx(struct energy_env *eenv)
  * If the task is and was blocked, we don't have to re-compute the
  * energy delta if the EAS CPU hasn't changed.
  */
-if (!eenv->p->on_rq && eenv->cpu[EAS_CPU_PRV].cpu_id == eenv->p->recent_used_cpu)
+if (!eenv->p->on_rq && eenv->cpu[EAS_CPU_PRV].cpu_id == task_cpu(eenv->p))
 return EAS_CPU_PRV;
 
 cpumask_clear(&eenv->cpus_mask);

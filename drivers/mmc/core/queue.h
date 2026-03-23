@@ -137,6 +137,8 @@ struct mmc_queue {
 	bool			rw_wait;
 	bool			use_cqe;
 	bool			in_recovery;
+	bool			recovery_needed;
+	bool			waiting;
 	struct work_struct	recovery_work;
 	wait_queue_head_t	wait;
 	struct request		*recovery_req;
