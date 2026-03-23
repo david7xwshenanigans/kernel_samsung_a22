@@ -306,4 +306,14 @@ config WMK_PATCH_SCHED_CFS_WAKEUP_PREEMPT_TUNE
 	  reducing perceived touch latency. Has no effect on non-boosted
 	  tasks.
 
+config WMK_PATCH_MM_SWAPPINESS_ACTIVE_TUNE
+	bool "WMK: Tune vmscan swappiness for active/boosted tasks"
+	default n
+	---help---
+	  If enabled, dynamically scales back vm_swappiness (by a factor of 4)
+	  during direct reclaim if the allocating task has a positive
+	  SchedTune boost (e.g., top-app cgroup). This directs the kernel
+	  to preferentially drop page cache rather than swapping out anonymous
+	  memory during interactive usage, reducing UI latency and jank.
+
 endmenu

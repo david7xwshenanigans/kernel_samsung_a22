@@ -16,6 +16,7 @@
 
 #include <linux/mm.h>
 #include <linux/sched/mm.h>
+#include <linux/sched/tune.h>
 #include <linux/module.h>
 #include <linux/gfp.h>
 #include <linux/kernel_stat.h>
@@ -2564,6 +2565,16 @@ static void get_scan_count(struct lruvec *lruvec, struct mem_cgroup *memcg,
 			   unsigned long *lru_pages)
 {
 	int swappiness = mem_cgroup_swappiness(memcg);
+
+#ifdef CONFIG_WMK_PATCH_MM_SWAPPINESS_ACTIVE_TUNE
+	/*
+	 * If direct-reclaiming from an interactive/boosted task,
+	 * scale back swappiness to favor dropping pagecache over
+	 * swapping, which reduces active UI latency.
+	 */
+	if (!current_is_kswapd() && schedtune_task_boost(current) > 0)
+		swappiness >>= 2;
+#endif
 	struct zone_reclaim_stat *reclaim_stat = &lruvec->reclaim_stat;
 	u64 fraction[2];
 	u64 denominator = 0;	/* gcc */
