@@ -77,6 +77,7 @@ void (*cpufreq_notifier_fp)(int cluster_id, unsigned long freq);
 EXPORT_SYMBOL(cpufreq_notifier_fp);
 
 #define SUGOV_KTHREAD_PRIORITY	50
+#define IOWAIT_BOOST_MIN	(SCHED_CAPACITY_SCALE / 8)
 
 struct sugov_tunables {
 	struct gov_attr_set attr_set;
@@ -123,7 +124,6 @@ struct sugov_cpu {
 	unsigned long util;
 	unsigned long max;
 	unsigned int flags;
-	unsigned long min_boost;
 
 	/* The field below is for single-CPU policies only. */
 #ifdef CONFIG_NO_HZ_COMMON
@@ -347,7 +347,7 @@ static void sugov_iowait_boost(struct sugov_cpu *sg_cpu, u64 time,
 		max_boost = uclamp_util(cpu_rq(sg_cpu->cpu), max_boost);
 
 		sg_cpu->iowait_boost = max(sg_cpu->iowait_boost << 1,
-					   sg_cpu->min_boost);
+					   IOWAIT_BOOST_MIN);
 
 		if (sg_cpu->iowait_boost > max_boost)
 			sg_cpu->iowait_boost = max_boost;
@@ -377,7 +377,7 @@ static void sugov_iowait_apply(struct sugov_cpu *sg_cpu, u64 time,
 		sg_cpu->iowait_boost_pending = false;
 	} else {
 		sg_cpu->iowait_boost >>= 1;
-		if (sg_cpu->iowait_boost < sg_cpu->min_boost) {
+		if (sg_cpu->iowait_boost < IOWAIT_BOOST_MIN) {
 			sg_cpu->iowait_boost = 0;
 			return;
 		}
@@ -976,9 +976,6 @@ static int sugov_start(struct cpufreq_policy *policy)
 		sg_cpu->sg_policy = sg_policy;
 		sg_cpu->flags = SCHED_CPUFREQ_DL;
 		sg_cpu->iowait_boost_max = capacity_orig_of(cpu);
-		sg_cpu->min_boost =
-			(SCHED_CAPACITY_SCALE * policy->cpuinfo.min_freq) /
-			policy->cpuinfo.max_freq;
 	}
 
 	for_each_cpu(cpu, policy->cpus) {
