@@ -70,14 +70,6 @@ static enum mmc_issue_type mmc_cqe_issue_type(struct mmc_host *host,
 	}
 }
 
-
-	case REQ_OP_FLUSH:
-		return mmc_cqe_can_dcmd(host) ? MMC_ISSUE_DCMD : MMC_ISSUE_SYNC;
-	default:
-		return MMC_ISSUE_ASYNC;
-	}
-}
-
 enum mmc_issue_type mmc_issue_type(struct mmc_queue *mq, struct request *req)
 {
 	if (req_op(req) == REQ_OP_READ || req_op(req) == REQ_OP_WRITE)
@@ -168,6 +160,7 @@ static bool mmc_check_blk_queue_start_tag(struct request_queue *q,
 	return !!ret;
 }
 
+#ifdef CONFIG_MTK_EMMC_HW_CQ
 static bool mmc_check_blk_queue_start(struct mmc_cmdq_context_info *ctx,
 	struct mmc_queue *mq)
 {
@@ -205,6 +198,7 @@ static inline void mmc_cmdq_ready_wait(struct mmc_host *host,
 			|| (host->claimed && host->claimer != current))
 		&& mmc_check_blk_queue_start(ctx, mq)));
 }
+#endif
 
 #ifdef CONFIG_MTK_EMMC_HW_CQ
 static int mmc_cmdq_thread(void *d)
@@ -481,6 +475,9 @@ static void mmc_setup_queue(struct mmc_queue *mq, struct mmc_card *card)
 	blk_queue_max_segments(mq->queue, host->max_segs);
 	blk_queue_max_segment_size(mq->queue, host->max_seg_size);
 
+	/* Keep legacy RPMB users from taking an uninitialized semaphore. */
+	sema_init(&mq->thread_sem, 1);
+
 	INIT_WORK(&mq->complete_work, mmc_blk_mq_complete_work);
 	INIT_WORK(&mq->recovery_work, mmc_mq_recovery_handler);
 
@@ -648,50 +645,6 @@ int mmc_init_queue(struct mmc_queue *mq, struct mmc_card *card,
 
 	return mmc_mq_init(mq, card, lock);
 }
-
-static void mmc_mq_queue_suspend(struct mmc_queue *mq)
-{
-	blk_mq_quiesce_queue(mq->queue);
-}
-
-static void mmc_mq_queue_resume(struct mmc_queue *mq)
-{
-	blk_mq_unquiesce_queue(mq->queue);
-}
-
-int mmc_queue_suspend(struct mmc_queue *mq, int wait)
-{
-	blk_mq_quiesce_queue(mq->queue);
-
-	/*
-	 * The host remains claimed while there are outstanding requests, so
-	 * simply claiming and releasing here ensures there are none.
-	 */
-	mmc_claim_host(mq->card->host);
-	mmc_release_host(mq->card->host);
-
-	return 0;
-}
-
-void mmc_cleanup_queue(struct mmc_queue *mq)
-{
-	struct request_queue *q = mq->queue;
-
-	if (blk_queue_quiesced(q))
-		blk_mq_unquiesce_queue(q);
-
-	blk_cleanup_queue(q);
-
-	/*
-	 * A request can be completed before the next request, potentially
-	 * leaving a complete_work with nothing to do. Such a work item might
-	 * still be queued at this point. Flush it.
-	 */
-	flush_work(&mq->complete_work);
-
-	mq->card = NULL;
-}
-EXPORT_SYMBOL(mmc_cleanup_queue);
 
 #ifdef CONFIG_MTK_EMMC_HW_CQ
 static void mmc_cmdq_softirq_done(struct request *rq)
@@ -927,6 +880,20 @@ void mmc_queue_resume(struct mmc_queue *mq)
 }
 #else
 
+int mmc_queue_suspend(struct mmc_queue *mq, int wait)
+{
+	blk_mq_quiesce_queue(mq->queue);
+
+	/*
+	 * The host remains claimed while there are outstanding requests, so
+	 * simply claiming and releasing here ensures there are none.
+	 */
+	mmc_claim_host(mq->card->host);
+	mmc_release_host(mq->card->host);
+
+	return 0;
+}
+
 void mmc_queue_resume(struct mmc_queue *mq)
 {
 	blk_mq_unquiesce_queue(mq->queue);
@@ -955,6 +922,7 @@ void mmc_cleanup_queue(struct mmc_queue *mq)
 	mq->card = NULL;
 }
 #endif
+EXPORT_SYMBOL(mmc_cleanup_queue);
 
 #ifdef CONFIG_MTK_EMMC_HW_CQ
 /*

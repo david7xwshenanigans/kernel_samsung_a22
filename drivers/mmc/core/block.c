@@ -305,7 +305,12 @@ static int send_stop(struct mmc_card *card, unsigned int timeout_ms,
 		*gen_err = true;
 	}
 
-	return card_busy_detect(card, timeout_ms, use_r1b_resp, req, gen_err);
+	err = card_busy_detect(card, timeout_ms, use_r1b_resp, req,
+				stop_status);
+	if (!err && !mmc_host_is_spi(host) && (*stop_status & R1_ERROR))
+		*gen_err = true;
+
+	return err;
 }
 
 static struct mmc_blk_data *mmc_blk_get(struct gendisk *disk)
@@ -1599,49 +1604,6 @@ static void mmc_sec_init_err_count(struct mmc_card *card)
 	 R1_CC_ERROR |		/* Card controller error */		\
 	 R1_ERROR)		/* General/unknown error */
 
-static int card_busy_detect(struct mmc_card *card, unsigned int timeout_ms,
-		bool hw_busy_detect, struct request *req, u32 *resp_errs)
-{
-	unsigned long timeout = jiffies + msecs_to_jiffies(timeout_ms);
-	int err = 0;
-	u32 status;
-
-	do {
-		err = mmc_send_status(card, &status);
-		if (err) {
-			pr_err("%s: error %d requesting status\n",
-			       req->rq_disk->disk_name, err);
-			return err;
-		}
-
-		if (status & R1_ERROR) {
-			pr_err("%s: %s: error sending status cmd, status %#x\n",
-			       req->rq_disk->disk_name, __func__, status);
-		}
-
-		/* If the card is in hot-reset state, it will be busy */
-		if (R1_CURRENT_STATE(status) == R1_STATE_PRG)
-			err = -EBUSY;
-
-		if (time_after(jiffies, timeout)) {
-			pr_err("%s: Card stuck in programming state! %s\n",
-				req->rq_disk->disk_name, __func__);
-			err = -ETIMEDOUT;
-			break;
-		}
-
-		/* Some devices require a delay before polling for busy */
-		if (err == -EBUSY)
-			msleep(1);
-
-	} while (err == -EBUSY);
-
-	if (resp_errs)
-		*resp_errs = status;
-
-	return err;
-}
-
 static int mmc_blk_send_stop(struct mmc_card *card, unsigned int timeout)
 {
 	struct mmc_command cmd = {
@@ -2542,6 +2504,7 @@ static enum mmc_blk_status mmc_blk_err_check(struct mmc_card *card,
 	if (!mmc_host_is_spi(card->host) && rq_data_dir(req) != READ
 		&& !cmdq_en) {
 		int err;
+		u32 status;
 
 		/* Check stop command response */
 		if (brq->stop.resp[0] & R1_ERROR) {
@@ -2552,9 +2515,11 @@ static enum mmc_blk_status mmc_blk_err_check(struct mmc_card *card,
 		}
 
 		err = card_busy_detect(card, MMC_BLK_TIMEOUT_MS, false, req,
-					&gen_err);
+					&status);
 		if (err)
 			return MMC_BLK_CMD_ERR;
+		if (status & R1_ERROR)
+			gen_err = true;
 	}
 
 	/* if general error occurs, retry the write operation. */
@@ -2599,7 +2564,7 @@ static enum mmc_blk_status mmc_blk_err_check(struct mmc_card *card,
 
 	return MMC_BLK_SUCCESS;
 }
-}
+
 
 static void mmc_blk_data_prep(struct mmc_queue *mq, struct mmc_queue_req *mqrq,
 			      int disable_multi, bool *do_rel_wr_p,
@@ -4838,25 +4803,15 @@ void mmc_blk_issue_rq(struct mmc_queue *mq, struct request *req)
 
 out:
 #ifdef CONFIG_MTK_EMMC_CQ_SUPPORT
-	/*
-	 * Since CQ has its own thread to handle mmc_put_card(, NULL).
-	 * We don't call mmc_put_card(, NULL) for read/write requests.
-	 *
-	 * But for request REQ_OP_DRV_IN REQ_OP_DRV_OUT
-	 * REQ_OP_DISCARD REQ_OP_SECURE_ERASE REQ_OP_FLUSH
-	 * which is other than read/write request needs to
-	 * call mmc_put_card(, NULL) here.
-	 */
 	if (part_cmdq_en) {
 		if (put_card)
 			mmc_put_card(card, NULL);
 	} else
 #endif
+	{
 		if (!atomic_read(&mq->qcnt))
-#else
-		if (1)
-#endif
 			mmc_put_card(card, NULL);
+	}
 }
 
 static inline int mmc_blk_readonly(struct mmc_card *card)
@@ -5622,9 +5577,9 @@ static int _mmc_blk_suspend(struct mmc_card *card)
 	struct mmc_blk_data *md = dev_get_drvdata(&card->dev);
 
 	if (md) {
-		mmc_queue_suspend(&md->queue);
+		mmc_queue_suspend(&md->queue, 1);
 		list_for_each_entry(part_md, &md->part, part) {
-			mmc_queue_suspend(&part_md->queue);
+			mmc_queue_suspend(&part_md->queue, 1);
 		}
 	}
 	return 0;

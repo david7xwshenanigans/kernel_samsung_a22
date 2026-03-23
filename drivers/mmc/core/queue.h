@@ -78,10 +78,8 @@ enum mmc_drv_op {
 };
 
 struct mmc_queue_req {
-#if defined(CONFIG_MTK_EMMC_CQ_SUPPORT) || defined(CONFIG_MTK_EMMC_HW_CQ)
 	struct request		*req;
 	struct mmc_async_req	areq;
-#endif
 	struct mmc_blk_request	brq;
 	struct scatterlist	*sg;
 	enum mmc_drv_op		drv_op;
@@ -99,10 +97,8 @@ struct mmc_queue_req {
 
 struct mmc_queue {
 	struct mmc_card		*card;
-#if defined(CONFIG_MTK_EMMC_CQ_SUPPORT) || defined(CONFIG_MTK_EMMC_HW_CQ)
 	struct task_struct	*thread;
 	struct semaphore	thread_sem;
-#endif
 #ifdef CONFIG_MTK_EMMC_HW_CQ
 	unsigned long	flags;
 #define MMC_QUEUE_SUSPENDED	(1 << 0)
@@ -111,9 +107,9 @@ struct mmc_queue {
 	struct blk_mq_tag_set	tag_set;
 	struct mmc_blk_data	*blkdata;
 	struct request_queue	*queue;
+	atomic_t		qcnt;
 #ifdef CONFIG_MTK_EMMC_CQ_SUPPORT
 	struct mmc_queue_req	mqrq[EMMC_MAX_QUEUE_DEPTH];
-	atomic_t		qcnt;
 #endif
 #ifdef CONFIG_MTK_EMMC_HW_CQ
 	struct mmc_queue_req	*mqrq_cmdq;
@@ -156,11 +152,7 @@ struct mmc_queue {
 extern int mmc_init_queue(struct mmc_queue *, struct mmc_card *, spinlock_t *,
 			  const char *, int);
 extern void mmc_cleanup_queue(struct mmc_queue *);
-#ifdef CONFIG_MTK_EMMC_HW_CQ
 extern int mmc_queue_suspend(struct mmc_queue *mq, int wait);
-#else
-extern void mmc_queue_suspend(struct mmc_queue *);
-#endif
 extern void mmc_queue_resume(struct mmc_queue *);
 #ifdef CONFIG_MTK_EMMC_HW_CQ
 extern unsigned int mmc_cmdq_queue_map_sg(struct mmc_queue *mq,
