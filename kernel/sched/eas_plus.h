@@ -42,7 +42,28 @@ migrate_running_task(int this_cpu, struct task_struct *p, struct rq *target);
 #ifdef CONFIG_UCLAMP_TASK
 static __always_inline
 unsigned long uclamp_rq_util_with(struct rq *rq, unsigned long util,
-					struct task_struct *p);
+					struct task_struct *p)
+{
+	unsigned long min_util = rq->uclamp.value[UCLAMP_MIN];
+	unsigned long max_util = rq->uclamp.value[UCLAMP_MAX];
+
+	if (p) {
+		min_util = max_t(unsigned long, min_util,
+			(unsigned long)uclamp_task_effective_util(p, UCLAMP_MIN));
+		max_util = max_t(unsigned long, max_util,
+			(unsigned long)uclamp_task_effective_util(p, UCLAMP_MAX));
+	}
+
+	/*
+	 * Since CPU's {min,max}_util clamps are MAX aggregated considering
+	 * RUNNABLE tasks with different clamps, we can end up with an
+	 * inversion. Fix it now when the clamps are applied.
+	 */
+	if (unlikely(min_util >= max_util))
+		return min_util;
+
+	return clamp(util, min_util, max_util);
+}
 #else
 
 inline unsigned long uclamp_rq_util_with(struct rq *rq, unsigned long util,
@@ -50,6 +71,10 @@ inline unsigned long uclamp_rq_util_with(struct rq *rq, unsigned long util,
 {
 	return util;
 }
+#endif
+
+#ifdef CONFIG_MTK_SCHED_EAS_POWER_SUPPORT
+#define fits_capacity(cap, max) ((cap) * capacity_margin < (max) * 1024)
 #endif
 
 #ifdef CONFIG_MTK_UNIFY_POWER
