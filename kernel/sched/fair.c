@@ -3031,6 +3031,7 @@ static u32 __accumulate_pelt_segments(u64 periods, u32 d1, u32 d3)
 
 	return c1 + c2 + c3;
 }
+/*
  *                           p-1
  * u' = (u + d1) y^p + 1024 \Sum y^n + d3 y^0
  *                           n=1
