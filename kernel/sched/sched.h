@@ -103,6 +103,10 @@ static inline void cpu_load_update_active(struct rq *this_rq) { }
 # define scale_load_down(w)	(w)
 #endif
 
+#ifndef cap_scale
+#define cap_scale(v, s) ((v) * (s) >> SCHED_CAPACITY_SHIFT)
+#endif
+
 /*
  * Task weight (visible to users) and its load (invisible to users) have
  * independent resolution, but they should be well calibrated. We use

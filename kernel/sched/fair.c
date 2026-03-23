@@ -6802,23 +6802,21 @@ static inline int select_energy_cpu_idx(struct energy_env *eenv)
 	if (!sd)
 		return -1;
 
-	cpumask_clear(&eenv->cpus_mask);
-	for (cpu_idx = EAS_CPU_PRV; cpu_idx < eenv->max_cpu_count; ++cpu_idx) {
-		int cpu = eenv->cpu[cpu_idx].cpu_id;
-
 /*
  * If the task is and was blocked, we don't have to re-compute the
  * energy delta if the EAS CPU hasn't changed.
  */
-if (!eenv->p->on_rq && eenv->cpu[EAS_CPU_PRV].cpu_id == task_cpu(eenv->p))
-return EAS_CPU_PRV;
+	if (!eenv->p->on_rq && eenv->cpu[EAS_CPU_PRV].cpu_id == task_cpu(eenv->p))
+		return EAS_CPU_PRV;
 
-cpumask_clear(&eenv->cpus_mask);
-for (cpu_idx = EAS_CPU_PRV; cpu_idx < eenv->max_cpu_count; ++cpu_idx) {
-int cpu = eenv->cpu[cpu_idx].cpu_id;
+	cpumask_clear(&eenv->cpus_mask);
+	for (cpu_idx = EAS_CPU_PRV; cpu_idx < eenv->max_cpu_count; ++cpu_idx) {
+		int cpu = eenv->cpu[cpu_idx].cpu_id;
 
-if (cpu < 0 || cpu_isolated(cpu))
-continue;
+		if (cpu >= 0 && !cpu_isolated(cpu))
+			cpumask_set_cpu(cpu, &eenv->cpus_mask);
+	}
+
 	/* remember - eenv energy values are unscaled */
 
 	/*
