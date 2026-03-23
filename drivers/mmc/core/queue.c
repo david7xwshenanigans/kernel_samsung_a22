@@ -168,6 +168,44 @@ static bool mmc_check_blk_queue_start_tag(struct request_queue *q,
 	return !!ret;
 }
 
+static bool mmc_check_blk_queue_start(struct mmc_cmdq_context_info *ctx,
+	struct mmc_queue *mq)
+{
+	struct request_queue *q = mq->queue;
+
+	if (!test_bit(CMDQ_STATE_ERR, &ctx->curr_state)
+		&& !mmc_check_blk_queue_start_tag(q, mq->cmdq_req_peeked))
+		return true;
+
+	return false;
+}
+
+static inline void mmc_cmdq_ready_wait(struct mmc_host *host,
+	struct mmc_queue *mq)
+{
+	struct mmc_cmdq_context_info *ctx = &host->cmdq_ctx;
+
+	/*
+	 * Wait until all of the following conditions are true:
+	 * 1. There is a request pending in the block layer queue
+	 *    to be processed.
+	 * 2. If the peeked request is flush/discard then there shouldn't
+	 *    be any other direct command active.
+	 * 3. cmdq state should be unhalted.
+	 * 4. cmdq state shouldn't be in error state.
+	 * 5. free tag available to process the new request.
+	 */
+	wait_event(ctx->wait, kthread_should_stop()
+		|| (!test_bit(CMDQ_STATE_DCMD_ACTIVE, &ctx->curr_state)
+		&& mmc_peek_request(mq)
+		&& ((!(!host->card->part_curr && !mmc_card_suspended(host->card)
+			 && mmc_host_halt(host))
+		&& !(!host->card->part_curr && mmc_host_cq_disable(host) &&
+			!mmc_card_suspended(host->card)))
+			|| (host->claimed && host->claimer != current))
+		&& mmc_check_blk_queue_start(ctx, mq)));
+}
+
 #ifdef CONFIG_MTK_EMMC_HW_CQ
 static int mmc_cmdq_thread(void *d)
 {

@@ -204,6 +204,107 @@ static void mmc_card_error_logging(struct mmc_card *card,
 static inline int mmc_blk_part_switch(struct mmc_card *card,
 				      unsigned int part_type);
 
+static inline bool mmc_blk_in_tran_state(u32 status)
+{
+	return R1_CURRENT_STATE(status) == R1_STATE_TRAN;
+}
+
+static unsigned int mmc_blk_data_timeout_ms(struct mmc_host *host,
+					   struct mmc_data *data)
+{
+	unsigned int ms = DIV_ROUND_UP(data->timeout_ns, 1000000);
+	unsigned int m;
+
+	if (!data->timeout_clks)
+		return ms;
+
+	m = data->timeout_clks;
+	m = DIV_ROUND_UP(m, host->actual_clock / 1000);
+
+	return ms + m;
+}
+
+static int card_busy_detect(struct mmc_card *card, unsigned int timeout_ms,
+		bool hw_busy_detect, struct request *req, u32 *resp_errs)
+{
+	unsigned long timeout = jiffies + msecs_to_jiffies(timeout_ms);
+	int err = 0;
+	u32 status;
+
+	do {
+		err = mmc_send_status(card, &status);
+		if (err) {
+			pr_err("%s: error %d requesting status\n",
+			       req->rq_disk->disk_name, err);
+			return err;
+		}
+
+		if (status & R1_ERROR) {
+			pr_err("%s: %s: error sending status cmd, status %#x\n",
+			       req->rq_disk->disk_name, __func__, status);
+		}
+
+		/* If the card is in hot-reset state, it will be busy */
+		if (R1_CURRENT_STATE(status) == R1_STATE_PRG)
+			err = -EBUSY;
+
+		if (time_after(jiffies, timeout)) {
+			pr_err("%s: Card stuck in programming state! %s\n",
+				req->rq_disk->disk_name, __func__);
+			err = -ETIMEDOUT;
+			break;
+		}
+
+		/* Some devices require a delay before polling for busy */
+		if (err == -EBUSY)
+			msleep(1);
+
+	} while (err == -EBUSY);
+
+	if (resp_errs)
+		*resp_errs = status;
+
+	return err;
+}
+
+static int send_stop(struct mmc_card *card, unsigned int timeout_ms,
+		struct request *req, bool *gen_err, u32 *stop_status)
+{
+	struct mmc_host *host = card->host;
+	struct mmc_command cmd = {0};
+	int err;
+	bool use_r1b_resp = rq_data_dir(req) == WRITE;
+
+	if (host->max_busy_timeout && (timeout_ms > host->max_busy_timeout))
+		use_r1b_resp = false;
+
+	cmd.opcode = MMC_STOP_TRANSMISSION;
+	if (use_r1b_resp) {
+		cmd.flags = MMC_RSP_SPI_R1B | MMC_RSP_R1B | MMC_CMD_AC;
+		cmd.busy_timeout = timeout_ms;
+	} else {
+		cmd.flags = MMC_RSP_SPI_R1 | MMC_RSP_R1 | MMC_CMD_AC;
+	}
+
+	err = mmc_wait_for_cmd(host, &cmd, 5);
+	if (err)
+		return err;
+
+	*stop_status = cmd.resp[0];
+
+	if (rq_data_dir(req) == READ)
+		return 0;
+
+	if (!mmc_host_is_spi(host) &&
+		(*stop_status & R1_ERROR)) {
+		pr_err("%s: %s: general error sending stop command, resp %#x\n",
+			req->rq_disk->disk_name, __func__, *stop_status);
+		*gen_err = true;
+	}
+
+	return card_busy_detect(card, timeout_ms, use_r1b_resp, req, gen_err);
+}
+
 static struct mmc_blk_data *mmc_blk_get(struct gendisk *disk)
 {
 	struct mmc_blk_data *md;
@@ -2907,6 +3008,8 @@ static int mmc_blk_fix_state(struct mmc_card *card, struct request *req)
 
 
 /* Single sector read during recovery */
+#define MMC_READ_SINGLE_RETRIES	2
+
 static void mmc_blk_read_single(struct mmc_queue *mq, struct request *req)
 {
 	struct mmc_queue_req *mqrq = req_to_mmc_queue_req(req);
@@ -3524,7 +3627,9 @@ static void mmc_blk_rw_cmd_abort(struct mmc_queue *mq, struct mmc_card *card,
 	if (mmc_card_removed(card))
 		req->rq_flags |= RQF_QUIET;
 	while (blk_end_request(req, BLK_STS_IOERR, blk_rq_cur_bytes(req)));
+#ifdef CONFIG_MTK_EMMC_CQ_SUPPORT
 	atomic_dec(&mq->qcnt);
+#endif
 }
 
 
@@ -4349,7 +4454,9 @@ int mmc_blk_end_queued_req(struct mmc_host *host,
 		}
 		mmc_put_card(card, NULL);
 		atomic_set(&mq->mqrq[index].index, 0);
+#ifdef CONFIG_MTK_EMMC_CQ_SUPPORT
 		atomic_dec(&mq->qcnt);
+#endif
 		atomic_dec(&host->areq_cnt);
 		break;
 	case MMC_BLK_CMD_ERR:
@@ -4383,7 +4490,9 @@ int mmc_blk_end_queued_req(struct mmc_host *host,
 		mmc_put_card(card, NULL);
 
 		atomic_set(&mq->mqrq[index].index, 0);
+#ifdef CONFIG_MTK_EMMC_CQ_SUPPORT
 		atomic_dec(&mq->qcnt);
+#endif
 		atomic_dec(&host->areq_cnt);
 
 		if (!ret)
@@ -4426,7 +4535,9 @@ cmd_abort:
 		mmc_put_card(card, NULL);
 
 	atomic_set(&mq->mqrq[index].index, 0);
+#ifdef CONFIG_MTK_EMMC_CQ_SUPPORT
 	atomic_dec(&mq->qcnt);
+#endif
 	atomic_dec(&host->areq_cnt);
 
 start_new_req:
@@ -4606,7 +4717,11 @@ void mmc_blk_issue_rq(struct mmc_queue *mq, struct request *req)
 	bool put_card = false;
 #endif
 
+#ifdef CONFIG_MTK_EMMC_CQ_SUPPORT
 	if (part_cmdq_en || (req && !atomic_read(&mq->qcnt)))
+#else
+	if (req)
+#endif
 		/* non-cq: claim host only for the first request
 		 * cq: claim host for per request
 		 */
@@ -4633,8 +4748,12 @@ void mmc_blk_issue_rq(struct mmc_queue *mq, struct request *req)
 			 * Complete ongoing async transfer before issuing
 			 * ioctl()s
 			 */
+#ifdef CONFIG_MTK_EMMC_CQ_SUPPORT
 			if (atomic_read(&mq->qcnt))
-				mmc_blk_issue_rw_rq(mq, NULL);
+#else
+			if (0)
+#endif
+				mmc_blk_mq_issue_rq(mq, NULL);
 			mmc_blk_issue_drv_op(mq, req);
 #ifdef CONFIG_MTK_EMMC_CQ_SUPPORT
 			put_card = true;
@@ -4645,8 +4764,12 @@ void mmc_blk_issue_rq(struct mmc_queue *mq, struct request *req)
 			 * Complete ongoing async transfer before issuing
 			 * discard.
 			 */
+#ifdef CONFIG_MTK_EMMC_CQ_SUPPORT
 			if (atomic_read(&mq->qcnt))
-				mmc_blk_issue_rw_rq(mq, NULL);
+#else
+			if (0)
+#endif
+				mmc_blk_mq_issue_rq(mq, NULL);
 			mmc_blk_issue_discard_rq(mq, req);
 #ifdef CONFIG_MTK_EMMC_CQ_SUPPORT
 			put_card = true;
@@ -4657,8 +4780,12 @@ void mmc_blk_issue_rq(struct mmc_queue *mq, struct request *req)
 			 * Complete ongoing async transfer before issuing
 			 * secure erase.
 			 */
+#ifdef CONFIG_MTK_EMMC_CQ_SUPPORT
 			if (atomic_read(&mq->qcnt))
-				mmc_blk_issue_rw_rq(mq, NULL);
+#else
+			if (0)
+#endif
+				mmc_blk_mq_issue_rq(mq, NULL);
 			mmc_blk_issue_secdiscard_rq(mq, req);
 #ifdef CONFIG_MTK_EMMC_CQ_SUPPORT
 			put_card = true;
@@ -4669,8 +4796,12 @@ void mmc_blk_issue_rq(struct mmc_queue *mq, struct request *req)
 			 * Complete ongoing async transfer before issuing
 			 * flush.
 			 */
+#ifdef CONFIG_MTK_EMMC_CQ_SUPPORT
 			if (atomic_read(&mq->qcnt))
-				mmc_blk_issue_rw_rq(mq, NULL);
+#else
+			if (0)
+#endif
+				mmc_blk_mq_issue_rq(mq, NULL);
 			mmc_blk_issue_flush(mq, req);
 #ifdef CONFIG_MTK_EMMC_CQ_SUPPORT
 			put_card = true;
@@ -4692,13 +4823,13 @@ void mmc_blk_issue_rq(struct mmc_queue *mq, struct request *req)
 			}
 #endif
 			/* Normal request, just issue it */
-			mmc_blk_issue_rw_rq(mq, req);
+				mmc_blk_mq_issue_rq(mq, req);
 			card->host->context_info.is_waiting_last_req = false;
 			break;
 		}
 	} else {
 		/* No request, flushing the pipeline with NULL */
-		mmc_blk_issue_rw_rq(mq, NULL);
+		mmc_blk_mq_issue_rq(mq, NULL);
 		card->host->context_info.is_waiting_last_req = false;
 	}
 
@@ -4719,6 +4850,9 @@ out:
 	} else
 #endif
 		if (!atomic_read(&mq->qcnt))
+#else
+		if (1)
+#endif
 			mmc_put_card(card, NULL);
 }
 
