@@ -30,7 +30,12 @@
 #define MAX_CORE (8)
 #define MAX_FREQ (20000000)
 #define TARGET_CORE (-1)
+#ifdef CONFIG_WMK_PATCH_TOUCH_BOOST_OPTIMIZE
+/* VENDOR FIX: reduce touch boost from 1183MHz to 900MHz for power savings */
+#define TARGET_FREQ (900000)
+#else
 #define TARGET_FREQ (1183000)
+#endif
 
 struct boost {
 	spinlock_t touch_lock;
