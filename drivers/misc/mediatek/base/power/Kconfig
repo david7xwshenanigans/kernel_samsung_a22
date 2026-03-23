@@ -243,10 +243,10 @@ config WMK_PATCH_SCHED_DYNAMIC_CAPACITY_MARGIN
 	select WMK_PATCH_SCHEDUTIL_SCREEN_OFF_RATE_LIMIT
 	default n
 	---help---
-	  Removes the artificial 25% frequency headroom when the screen
-	  is off. While UI requires this margin for smoothness, standby
-	  tasks do not. Removing it allows the CPU to run at the most
-	  efficient energy point for background loads.
+	  Adjusts schedutil frequency headroom based on screen state.
+	  Screen-on uses 1.125x (reduced from 1.25x for active power savings).
+	  Screen-off removes headroom entirely (1.0x) so the CPU runs at
+	  the most efficient energy point for background loads.
 
 config WMK_PATCH_RCU_FORCE_NORMAL
 	bool "WMK: Force normal RCU grace periods (battery saver)"

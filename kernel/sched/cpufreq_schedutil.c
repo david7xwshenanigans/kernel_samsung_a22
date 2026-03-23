@@ -42,8 +42,8 @@ static int sugov_fb_notifier_callback(struct notifier_block *self,
 	case FB_BLANK_UNBLANK:
 		sugov_screen_on = true;
 #ifdef CONFIG_WMK_PATCH_SCHED_DYNAMIC_CAPACITY_MARGIN
-		/* Restore 1.25x frequency headroom for UI fluidity. */
-		capacity_margin = 1280;
+		/* 1.125x headroom — reduced from 1.25x for active power savings */
+		capacity_margin = 1152;
 #endif
 		break;
 	case FB_BLANK_POWERDOWN:
