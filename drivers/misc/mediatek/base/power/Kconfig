@@ -316,4 +316,13 @@ config WMK_PATCH_MM_SWAPPINESS_ACTIVE_TUNE
 	  to preferentially drop page cache rather than swapping out anonymous
 	  memory during interactive usage, reducing UI latency and jank.
 
+config WMK_PATCH_BLOCK_PLUG_DEPTH
+	bool "WMK: Increase block layer plug depth to 32"
+	default n
+	---help---
+	  If enabled, increases BLK_MAX_REQUEST_COUNT from 16 to 32. This allows
+	  blk-mq to batch up to 32 requests in task plug lists before implicitly
+	  flushing them to the hardware tag-set, which slightly improves sequential
+	  throughput for high-IOPS storage like eMMC.
+
 endmenu

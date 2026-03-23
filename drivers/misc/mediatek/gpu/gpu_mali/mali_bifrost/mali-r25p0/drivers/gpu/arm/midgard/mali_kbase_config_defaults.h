@@ -105,7 +105,9 @@ enum {
 /**
  * Power Manager number of ticks before shader cores are powered off
  */
-#ifdef CONFIG_WMK_PATCH_MALI_SHADER_TIMEOUT
+
+// CONFIG_WMK_PATCH_MALI_SHADER_TIMEOUT was removed as it was just a revert to baseline 2.
+#if 0
 /* VENDOR FIX: use baseline 2-tick shader power-off for active power savings */
 #define DEFAULT_PM_POWEROFF_TICK_SHADER (2) /* 400-800us */
 #else

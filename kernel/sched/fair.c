@@ -8698,12 +8698,15 @@ wakeup_gran(struct sched_entity *curr, struct sched_entity *se)
 
 #ifdef CONFIG_WMK_PATCH_SCHED_CFS_WAKEUP_PREEMPT_TUNE
 	/*
-	 * If the waking task belongs to a boosted cgroup (e.g. top-app),
-	 * halve the granularity so it preempts background work faster.
+	 * VENDOR FIX: If the waking task belongs to a highly boosted cgroup
+	 * (e.g. top-app, boost > 10), halve the granularity so it preempts
+	 * background work faster. Bound to 1ms to prevent starvation.
 	 */
 	if (entity_is_task(se) &&
-	    schedtune_task_boost(task_of(se)) > 0)
-		gran >>= 1;
+	    schedtune_task_boost(task_of(se)) > 10) {
+		unsigned long min_gran = 1000000UL; /* 1ms */
+		gran = max(gran >> 1, min_gran);
+	}
 #endif
 
 	/*
@@ -12414,16 +12417,20 @@ static void propagate_entity_cfs_rq(struct sched_entity *se)
 	se = se->parent;
 
 	for_each_sched_entity(se) {
+		int on_list;
+
 		cfs_rq = cfs_rq_of(se);
 
-		if (!cfs_rq_throttled(cfs_rq)){
-			update_load_avg(cfs_rq, se, UPDATE_TG);
+		if (!cfs_rq_throttled(cfs_rq)) {
+			update_load_avg(se, UPDATE_TG);
 			list_add_leaf_cfs_rq(cfs_rq);
 			continue;
 		}
 
 		update_load_avg(se, UPDATE_TG);
-		if (list_add_leaf_cfs_rq(cfs_rq))
+		on_list = cfs_rq->on_list;
+		list_add_leaf_cfs_rq(cfs_rq);
+		if (on_list)
 			break;
 	}
 }

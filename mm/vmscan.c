@@ -2566,15 +2566,7 @@ static void get_scan_count(struct lruvec *lruvec, struct mem_cgroup *memcg,
 {
 	int swappiness = mem_cgroup_swappiness(memcg);
 
-#ifdef CONFIG_WMK_PATCH_MM_SWAPPINESS_ACTIVE_TUNE
-	/*
-	 * If direct-reclaiming from an interactive/boosted task,
-	 * scale back swappiness to favor dropping pagecache over
-	 * swapping, which reduces active UI latency.
-	 */
-	if (!current_is_kswapd() && schedtune_task_boost(current) > 0)
-		swappiness >>= 2;
-#endif
+
 	struct zone_reclaim_stat *reclaim_stat = &lruvec->reclaim_stat;
 	u64 fraction[2];
 	u64 denominator = 0;	/* gcc */
@@ -2586,6 +2578,17 @@ static void get_scan_count(struct lruvec *lruvec, struct mem_cgroup *memcg,
 	enum lru_list lru;
 
 	prepare_workingset_protection(pgdat, sc);
+
+#ifdef CONFIG_WMK_PATCH_MM_SWAPPINESS_ACTIVE_TUNE
+	/*
+	 * VENDOR FIX: If direct-reclaiming from a highly interactive task,
+	 * (boost > 10, distinguishing from other boosted non-UI tasks),
+	 * scale back swappiness to favor dropping pagecache over swapping.
+	 * This modifies a stack variable and is inherently race-free.
+	 */
+	if (!current_is_kswapd() && schedtune_task_boost(current) > 10)
+		swappiness >>= 2;
+#endif
 
 	/* If we have no swap space, do not bother scanning anon pages. */
 	if (!sc->may_swap || mem_cgroup_get_nr_swap_pages(memcg) <= 0) {

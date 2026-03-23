@@ -1429,7 +1429,12 @@ struct blk_plug {
 	struct list_head mq_list; /* blk-mq requests */
 	struct list_head cb_list; /* md requires an unplug callback */
 };
+#ifdef CONFIG_WMK_PATCH_BLOCK_PLUG_DEPTH
+/* VENDOR FIX: increase plug depth for better eMMC throughput */
 #define BLK_MAX_REQUEST_COUNT 32
+#else
+#define BLK_MAX_REQUEST_COUNT 16
+#endif
 #define BLK_PLUG_FLUSH_SIZE (128 * 1024)
 
 struct blk_plug_cb;
