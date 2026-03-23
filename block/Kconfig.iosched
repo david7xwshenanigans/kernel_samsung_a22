@@ -69,6 +69,7 @@ choice
 		bool "BFQ" if IOSCHED_BFQ=y
 
 	config DEFAULT_NOOP
+
 		bool "No-op"
 
 endchoice
@@ -80,6 +81,7 @@ config DEFAULT_IOSCHED
 	default "anxiety" if DEFAULT_ANXIETY
 	default "bfq" if DEFAULT_BFQ
 	default "noop" if DEFAULT_NOOP
+
 
 config MQ_IOSCHED_DEADLINE
 	tristate "MQ deadline I/O scheduler"
