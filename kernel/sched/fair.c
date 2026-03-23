@@ -8319,7 +8319,7 @@ static int find_energy_efficient_cpu(struct sched_domain *sd,
 			sd = rcu_dereference(per_cpu(sd_ea, prev_cpu));
 
 		for_each_cpu_and(cpu_iter, &p->cpus_allowed, sched_domain_span(sd)) {
-			unsigned long spare;
+			unsigned long util, cpu_cap;
 
 			/* prev_cpu already in list */
 			if (cpu_iter == prev_cpu)
@@ -8329,8 +8329,10 @@ static int find_energy_efficient_cpu(struct sched_domain *sd,
 			 * Consider only CPUs where the task is expected to
 			 * fit without making the CPU overutilized.
 			 */
-			spare = capacity_spare_without(cpu_iter, p);
-			if (spare * 1024 < capacity_margin * task_util_est(p))
+			util = cpu_util_without(cpu_iter, p) + task_util_est(p);
+			cpu_cap = capacity_of(cpu_iter);
+			util = uclamp_rq_util_with(cpu_rq(cpu_iter), util, p);
+			if (!fits_capacity(util, cpu_cap))
 				continue;
 
 			/* Add CPU candidate */
