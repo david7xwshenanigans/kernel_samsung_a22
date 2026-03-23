@@ -277,6 +277,16 @@ config WMK_PATCH_MALI_R54P2_DEFER_POWER_DOWN
 	  Prevents L2/MCU state machine warnings and expensive HW 
 	  re-initializations during rapid sleep/wake cycles.
 
+config WMK_PATCH_GED_UI_AWARE_DVFS
+	bool "WMK: Require sustained GPU load before multi-step DVFS jumps"
+	depends on MTK_GPU_SUPPORT
+	default n
+	---help---
+	  Makes the GED timer-based DVFS policy treat isolated load spikes
+	  more conservatively during UI rendering. Transient spikes can still
+	  raise the GPU by one step, but multi-step jumps are only allowed
+	  once heavy loading is sustained across consecutive samples.
+
 config WMK_PATCH_TOUCH_BOOST_OPTIMIZE
 	bool "WMK: Reduce touch boost target from 1183MHz to 900MHz"
 	default n

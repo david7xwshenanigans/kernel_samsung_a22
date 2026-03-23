@@ -1332,6 +1332,13 @@ static bool ged_dvfs_policy(
 		else if (ui32GPULoading <= 50)
 			i32NewFreqID += 1;
 
+#ifdef CONFIG_WMK_PATCH_GED_UI_AWARE_DVFS
+		if (i32NewFreqID < (int)ui32GPUFreq - 1 &&
+		    ui32GPULoading < 99 && gpu_pre_loading < 70)
+			/* VENDOR FIX: require sustained load before steep upscaling */
+			i32NewFreqID = max((int)ui32GPUFreq - 1, 0);
+#endif
+
 		if (i32NewFreqID < ui32GPUFreq) {
 			if (gpu_pre_loading * 17 / 10 < ui32GPULoading)
 				i32NewFreqID -= 1;
@@ -2413,4 +2420,3 @@ module_param(gpu_cust_upbound_freq, uint, 0644);
 module_param(g_gpu_timer_based_emu, uint, 0644);
 module_param(gpu_bw_err_debug, uint, 0644);
 #endif
-
