@@ -550,7 +550,7 @@ int emmc_rpmb_req_handle(struct mmc_card *card, struct emmc_rpmb_req *rpmb_req)
 
 	/*  MSG(INFO, "%s start.\n", __func__); */
 
-	mmc_get_card(card);
+	mmc_get_card(card, &part_md->queue.ctx);
 
 	/*
 	 * STEP1: Switch to RPMB partition.
@@ -581,7 +581,7 @@ error:
 		MSG(ERR, "%s emmc_rpmb_switch main failed. (%x)\n",
 			__func__, ret);
 
-	mmc_put_card(card);
+	mmc_put_card(card, &part_md->queue.ctx);
 
 	up(&part_md->queue.thread_sem);
 
