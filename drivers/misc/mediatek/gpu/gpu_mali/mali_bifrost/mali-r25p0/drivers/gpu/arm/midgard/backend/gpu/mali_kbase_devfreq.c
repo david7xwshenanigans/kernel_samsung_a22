@@ -43,9 +43,44 @@
 #define dev_pm_opp opp
 #define dev_pm_opp_get_voltage opp_get_voltage
 #define dev_pm_opp_get_opp_count opp_get_opp_count
+#define dev_pm_opp_find_freq_exact opp_find_freq_exact
 #define dev_pm_opp_find_freq_ceil opp_find_freq_ceil
 #define dev_pm_opp_find_freq_floor opp_find_freq_floor
 #endif /* Linux >= 3.13 */
+
+/**
+ * get_voltage - Get the voltage corresponding to a nominal devfreq rate
+ * @kbdev: Device pointer
+ * @freq: Nominal frequency in Hz
+ *
+ * This is used only when an operating-points-v2-mali table is not present.
+ *
+ * Return: Voltage value in micro volts, 0 in case of error.
+ */
+static unsigned long get_voltage(struct kbase_device *kbdev, unsigned long freq)
+{
+	struct dev_pm_opp *opp;
+	unsigned long voltage = 0;
+
+#if LINUX_VERSION_CODE < KERNEL_VERSION(4, 11, 0)
+	rcu_read_lock();
+#endif
+	opp = dev_pm_opp_find_freq_exact(kbdev->dev, freq, true);
+	if (IS_ERR_OR_NULL(opp))
+		dev_err(kbdev->dev, "Failed to get opp (%d)\n",
+			PTR_ERR_OR_ZERO(opp));
+	else {
+		voltage = dev_pm_opp_get_voltage(opp);
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 11, 0)
+		dev_pm_opp_put(opp);
+#endif
+	}
+#if LINUX_VERSION_CODE < KERNEL_VERSION(4, 11, 0)
+	rcu_read_unlock();
+#endif
+
+	return voltage;
+}
 
 /**
  * opp_translate - Translate nominal OPP frequency from devicetree into real
