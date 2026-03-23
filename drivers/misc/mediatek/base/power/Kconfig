@@ -288,23 +288,23 @@ config WMK_PATCH_GED_UI_AWARE_DVFS
 	  once heavy loading is sustained across consecutive samples.
 
 config WMK_PATCH_TOUCH_BOOST_OPTIMIZE
-	bool "WMK: Reduce touch boost target from 1183MHz to 900MHz"
+	bool "WMK: Use lower and decaying touch boost floors"
 	default n
 	---help---
-	  Lowers the CPU frequency target set on every touch event from
-	  1183MHz to 900MHz. The stock value causes unnecessary voltage
-	  and frequency spikes during scrolling and tapping. 900MHz
-	  provides adequate responsiveness while reducing active power.
+	  Starts touch input with a lower 900MHz CPU floor instead of the
+	  stock 1183MHz and automatically decays long-running gestures to
+	  a lower sustained floor. This keeps tap and gesture-start
+	  responsiveness while reducing active power during scrolling.
 
 config WMK_PATCH_THERMAL_POLLING_RELAX
-	bool "WMK: Relax thermal polling to 500ms below 65C"
+	bool "WMK: Use wider thermal polling bands while cool"
 	default n
 	---help---
-	  When the thermal zone temperature is safely below 65C, the
-	  polling interval is relaxed to 500ms instead of the stock
-	  250ms. This reduces CPU wakeup overhead during normal active
-	  use. Above 65C, the default polling rate is preserved to
-	  ensure fast thermal response.
+	  Relaxes thermal polling more aggressively while zones are cool:
+	  below 50C the interval can relax to 1000ms, below 65C it can
+	  relax to 500ms, and above 65C the stock delay is used. This
+	  cuts polling wakeups during normal active use without slowing
+	  thermal response near throttling territory.
 
 config WMK_PATCH_SCHED_CFS_WAKEUP_PREEMPT_TUNE
 	bool "WMK: Tune CFS wakeup preemption for responsiveness"
