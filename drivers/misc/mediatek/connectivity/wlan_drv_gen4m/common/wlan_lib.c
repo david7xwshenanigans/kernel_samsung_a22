@@ -1523,13 +1523,15 @@ void wlanIST(IN struct ADAPTER *prAdapter)
 			DBGLOG(REQ, INFO, "Fail: nicProcessIST! status [%x]\n",
 			       u4Status);
 		}
-#if defined(CONFIG_ANDROID) && (CFG_ENABLE_WAKE_LOCK)
-		if (KAL_WAKE_LOCK_ACTIVE(prAdapter,
-					 prAdapter->prGlueInfo->rIntrWakeLock))
-			KAL_WAKE_UNLOCK(prAdapter,
-					prAdapter->prGlueInfo->rIntrWakeLock);
-#endif
 	}
+
+#if defined(CONFIG_ANDROID) && (CFG_ENABLE_WAKE_LOCK)
+	/* VENDOR FIX: release interrupt wakelock on every handled IRQ path. */
+	if (KAL_WAKE_LOCK_ACTIVE(prAdapter,
+				 prAdapter->prGlueInfo->rIntrWakeLock))
+		KAL_WAKE_UNLOCK(prAdapter,
+				prAdapter->prGlueInfo->rIntrWakeLock);
+#endif
 
 	nicEnableInterrupt(prAdapter);
 
@@ -7523,6 +7525,25 @@ void wlanInitFeatureOption(IN struct ADAPTER *prAdapter)
 	prWifiVar->u4WakeLockThreadWakeup = wlanCfgGetUint32(
 					prAdapter, "WakeLockThreadTO",
 					WAKE_LOCK_THREAD_WAKEUP_TIMEOUT);
+	/* VENDOR FIX: clamp misconfigured wake-lock timeouts to sane limits. */
+	if (prWifiVar->u4WakeLockRxTimeout >
+	    SEC_TO_MSEC(WAKE_LOCK_MAX_TIME)) {
+		DBGLOG(INIT, WARN,
+		       "WakeLockRxTO %u too large, clamp to %u\n",
+		       prWifiVar->u4WakeLockRxTimeout,
+		       SEC_TO_MSEC(WAKE_LOCK_MAX_TIME));
+		prWifiVar->u4WakeLockRxTimeout =
+			SEC_TO_MSEC(WAKE_LOCK_MAX_TIME);
+	}
+	if (prWifiVar->u4WakeLockThreadWakeup >
+	    SEC_TO_MSEC(WAKE_LOCK_MAX_TIME)) {
+		DBGLOG(INIT, WARN,
+		       "WakeLockThreadTO %u too large, clamp to %u\n",
+		       prWifiVar->u4WakeLockThreadWakeup,
+		       SEC_TO_MSEC(WAKE_LOCK_MAX_TIME));
+		prWifiVar->u4WakeLockThreadWakeup =
+			SEC_TO_MSEC(WAKE_LOCK_MAX_TIME);
+	}
 
 	prWifiVar->ucSmartRTS = (uint8_t) wlanCfgGetUint32(
 					prAdapter, "SmartRTS", 0);
