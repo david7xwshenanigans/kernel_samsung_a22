@@ -1,8 +1,8 @@
 # SPDX-License-Identifier: GPL-2.0
 VERSION = 4
 PATCHLEVEL = 14
-SUBLEVEL = 364
-EXTRAVERSION = -lineage
+SUBLEVEL = 365
+EXTRAVERSION = -wm
 NAME = World Machine
 
 # *DOCUMENTATION*
