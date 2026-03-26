@@ -34,6 +34,7 @@ override CFLAGS += -fPIC
 override CFLAGS += $(INCLUDES)
 override CFLAGS += -fvisibility=hidden
 override CFLAGS += -D_LARGEFILE64_SOURCE -D_FILE_OFFSET_BITS=64
+override CFLAGS += -DCOMPAT_NEED_REALLOCARRAY
 
 ifeq ($(VERBOSE),1)
   Q =
