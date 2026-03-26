@@ -81,7 +81,8 @@
 #define P2P_INF_NAME "p2p%d"
 
 #if CFG_TC10_FEATURE
-#define AP_INF_NAME  "swlan%d"
+/* VENDOR FIX: use the standard SoftAP ifname to match userspace. */
+#define AP_INF_NAME  "ap%d"
 #else
 #define AP_INF_NAME  "ap%d"
 #endif
