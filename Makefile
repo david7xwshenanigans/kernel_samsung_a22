@@ -1,9 +1,9 @@
 # SPDX-License-Identifier: GPL-2.0
 VERSION = 4
 PATCHLEVEL = 14
-SUBLEVEL = 365
-EXTRAVERSION = -wm
-NAME = World Machine
+SUBLEVEL = 366
+EXTRAVERSION = -workqueue
+NAME = Paranoid Workqueue
 
 # *DOCUMENTATION*
 # To see a list of typical targets execute "make help"
