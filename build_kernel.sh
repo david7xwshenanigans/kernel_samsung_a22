@@ -2,16 +2,22 @@
 
 # Parse command line arguments
 QUIET_MODE=false
+KEEP_GOING=false
 while [[ $# -gt 0 ]]; do
     case $1 in
         -q|--quiet)
             QUIET_MODE=true
             shift
             ;;
+        -k|--keep-going)
+            KEEP_GOING=true
+            shift
+            ;;
         *)
             echo "Unknown option: $1"
-            echo "Usage: $0 [-q|--quiet]"
+            echo "Usage: $0 [-q|--quiet] [-k|--keep-going]"
             echo "  -q, --quiet    Only show errors during make operations"
+            echo "  -k, --keep-going    Pass -k to make during compilation"
             exit 1
             ;;
     esac
@@ -334,6 +340,13 @@ print_status "Architecture: arm64"
 print_status "Compiler: $CC_CMD"
 print_status "Suppressing warnings: enabled"
 print_status "Section mismatch warnings only: enabled"
+if [ "$KEEP_GOING" = true ]; then
+    print_status "Keep-going mode: enabled"
+    MAKE_KEEP_GOING="-k"
+else
+    print_status "Keep-going mode: disabled"
+    MAKE_KEEP_GOING=""
+fi
 
 # Configure kernel
 print_section "KERNEL CONFIGURATION"
@@ -352,7 +365,7 @@ print_status "Starting compilation with 16 parallel jobs..."
 print_status "This may take several minutes depending on your hardware..."
 
 # Store build command for reference
-BUILD_CMD="make -j16 ARCH=arm64 SUBARCH=arm64 O=$PREFIX/out \
+BUILD_CMD="make $MAKE_KEEP_GOING -j16 ARCH=arm64 SUBARCH=arm64 O=$PREFIX/out \
 CC=\"$CC_CMD\" \
 AR=\"llvm-ar\" \
 NM=\"llvm-nm\" \
