@@ -740,6 +740,12 @@ __SYSCALL(__NR_rseq, sys_rseq)
 __SYSCALL(__NR_kexec_file_load, sys_kexec_file_load)
 #define __NR_pidfd_send_signal 424
 __SYSCALL(__NR_pidfd_send_signal, sys_pidfd_send_signal)
+#define __NR_io_uring_setup 425
+__SYSCALL(__NR_io_uring_setup, sys_io_uring_setup)
+#define __NR_io_uring_enter 426
+__SYSCALL(__NR_io_uring_enter, sys_io_uring_enter)
+#define __NR_io_uring_register 427
+__SYSCALL(__NR_io_uring_register, sys_io_uring_register)
 #define __NR_open_tree 428
 __SYSCALL(__NR_open_tree, sys_open_tree)
 #define __NR_move_mount 429

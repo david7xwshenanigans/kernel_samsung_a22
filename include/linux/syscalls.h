@@ -17,6 +17,7 @@ struct iattr;
 struct inode;
 struct iocb;
 struct io_event;
+struct io_uring_params;
 struct iovec;
 struct itimerspec;
 struct itimerval;
@@ -552,6 +553,13 @@ asmlinkage long sys_io_pgetevents(aio_context_t ctx_id,
 				struct io_event __user *events,
 				struct __kernel_timespec __user *timeout,
 				const struct __aio_sigset __user *usig);
+asmlinkage long sys_io_uring_setup(u32 entries,
+				   struct io_uring_params __user *params);
+asmlinkage long sys_io_uring_enter(unsigned int fd, u32 to_submit,
+				   u32 min_complete, u32 flags,
+				   const void __user *argp, size_t argsz);
+asmlinkage long sys_io_uring_register(unsigned int fd, unsigned int opcode,
+				      void __user *arg, unsigned int nr_args);
 asmlinkage long sys_io_submit(aio_context_t, long,
 				struct iocb __user * __user *);
 asmlinkage long sys_io_cancel(aio_context_t ctx_id, struct iocb __user *iocb,
