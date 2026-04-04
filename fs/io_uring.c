@@ -58,6 +58,7 @@
 #include <linux/percpu.h>
 #include <linux/slab.h>
 #include <linux/blkdev.h>
+#include <linux/ioprio.h>
 #include <linux/bvec.h>
 #include <linux/net.h>
 #include <net/sock.h>
@@ -1293,8 +1294,7 @@ static struct io_ring_ctx *io_ring_ctx_alloc(struct io_uring_params *p)
 	/* set invalid range, so io_import_fixed() fails meeting it */
 	ctx->dummy_ubuf->ubuf = -1UL;
 
-	if (percpu_ref_init(&ctx->refs, io_ring_ctx_ref_free,
-			    PERCPU_REF_ALLOW_REINIT, GFP_KERNEL))
+	if (percpu_ref_init(&ctx->refs, io_ring_ctx_ref_free, 0, GFP_KERNEL))
 		goto err;
 
 	ctx->flags = p->flags;
@@ -3109,7 +3109,7 @@ static ssize_t io_compat_import(struct io_kiocb *req, struct iovec *iov,
 	ssize_t len;
 
 	uiov = u64_to_user_ptr(req->rw.addr);
-	if (!access_ok(uiov, sizeof(*uiov)))
+	if (!access_ok(VERIFY_READ, uiov, sizeof(*uiov)))
 		return -EFAULT;
 	if (__get_user(clen, &uiov->iov_len))
 		return -EFAULT;
@@ -3938,14 +3938,14 @@ static int io_shutdown(struct io_kiocb *req, unsigned int issue_flags)
 {
 #if defined(CONFIG_NET)
 	struct socket *sock;
-	int ret;
+	int ret = -EBADF;
 
 	if (issue_flags & IO_URING_F_NONBLOCK)
 		return -EAGAIN;
 
-	sock = sock_from_file(req->file);
+	sock = sock_from_file(req->file, &ret);
 	if (unlikely(!sock))
-		return -ENOTSOCK;
+		return ret;
 
 	ret = __sys_shutdown_sock(sock, req->shutdown.how);
 	if (ret < 0)
@@ -4361,7 +4361,7 @@ static int io_provide_buffers_prep(struct io_kiocb *req,
 		return -EOVERFLOW;
 
 	size = (unsigned long)p->len * p->nbufs;
-	if (!access_ok(u64_to_user_ptr(p->addr), size))
+	if (!access_ok(VERIFY_READ, u64_to_user_ptr(p->addr), size))
 		return -EFAULT;
 
 	p->bgid = READ_ONCE(sqe->buf_group);
@@ -4750,11 +4750,11 @@ static int io_sendmsg(struct io_kiocb *req, unsigned int issue_flags)
 	struct socket *sock;
 	unsigned flags;
 	int min_ret = 0;
-	int ret;
+	int ret = -EBADF;
 
-	sock = sock_from_file(req->file);
+	sock = sock_from_file(req->file, &ret);
 	if (unlikely(!sock))
-		return -ENOTSOCK;
+		return ret;
 
 	kmsg = req->async_data;
 	if (!kmsg) {
@@ -4794,11 +4794,11 @@ static int io_send(struct io_kiocb *req, unsigned int issue_flags)
 	struct socket *sock;
 	unsigned flags;
 	int min_ret = 0;
-	int ret;
+	int ret = -EBADF;
 
-	sock = sock_from_file(req->file);
+	sock = sock_from_file(req->file, &ret);
 	if (unlikely(!sock))
-		return -ENOTSOCK;
+		return ret;
 
 	ret = import_single_range(WRITE, sr->buf, sr->len, &iov, &msg.msg_iter);
 	if (unlikely(ret))
@@ -4881,7 +4881,7 @@ static int __io_compat_recvmsg_copy_hdr(struct io_kiocb *req,
 
 		if (len > 1)
 			return -EINVAL;
-		if (!access_ok(uiov, sizeof(*uiov)))
+		if (!access_ok(VERIFY_READ, uiov, sizeof(*uiov)))
 			return -EFAULT;
 		if (__get_user(clen, &uiov->iov_len))
 			return -EFAULT;
@@ -4973,12 +4973,12 @@ static int io_recvmsg(struct io_kiocb *req, unsigned int issue_flags)
 	struct io_buffer *kbuf;
 	unsigned flags;
 	int min_ret = 0;
-	int ret, cflags = 0;
+	int ret = -EBADF, cflags = 0;
 	bool force_nonblock = issue_flags & IO_URING_F_NONBLOCK;
 
-	sock = sock_from_file(req->file);
+	sock = sock_from_file(req->file, &ret);
 	if (unlikely(!sock))
-		return -ENOTSOCK;
+		return ret;
 
 	kmsg = req->async_data;
 	if (!kmsg) {
@@ -5033,12 +5033,12 @@ static int io_recv(struct io_kiocb *req, unsigned int issue_flags)
 	struct iovec iov;
 	unsigned flags;
 	int min_ret = 0;
-	int ret, cflags = 0;
+	int ret = -EBADF, cflags = 0;
 	bool force_nonblock = issue_flags & IO_URING_F_NONBLOCK;
 
-	sock = sock_from_file(req->file);
+	sock = sock_from_file(req->file, &ret);
 	if (unlikely(!sock))
-		return -ENOTSOCK;
+		return ret;
 
 	if (req->flags & REQ_F_BUFFER_SELECT) {
 		kbuf = io_recv_buffer_select(req, !force_nonblock);
