@@ -2000,12 +2000,19 @@ static inline enum rw_hint file_write_hint(struct file *file)
 
 static inline int iocb_flags(struct file *file);
 
+static inline enum rw_hint ki_hint_validate(enum rw_hint hint)
+{
+	if (hint <= WRITE_LIFE_EXTREME)
+		return hint;
+	return WRITE_LIFE_NOT_SET;
+}
+
 static inline void init_sync_kiocb(struct kiocb *kiocb, struct file *filp)
 {
 	*kiocb = (struct kiocb) {
 		.ki_filp = filp,
 		.ki_flags = iocb_flags(filp),
-		.ki_hint = file_write_hint(filp),
+		.ki_hint = ki_hint_validate(file_write_hint(filp)),
 	};
 }
 
@@ -2793,6 +2800,10 @@ extern int __inode_permission(struct inode *, int);
 extern int __inode_permission2(struct vfsmount *, struct inode *, int);
 extern int generic_permission(struct inode *, int);
 extern int __check_sticky(struct inode *dir, struct inode *inode);
+static inline int file_permission(struct file *file, int mask)
+{
+	return inode_permission(file_inode(file), mask);
+}
 
 static inline bool execute_ok(struct inode *inode)
 {
