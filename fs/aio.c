@@ -1328,19 +1328,13 @@ static bool aio_read_events(struct kioctx *ctx, long min_nr, long nr,
 
 static long read_events(struct kioctx *ctx, long min_nr, long nr,
 			struct io_event __user *event,
-			struct timespec __user *timeout)
+			const struct timespec *timeout)
 {
 	ktime_t until = KTIME_MAX;
 	long ret = 0;
 
-	if (timeout) {
-		struct timespec	ts;
-
-		if (unlikely(copy_from_user(&ts, timeout, sizeof(ts))))
-			return -EFAULT;
-
-		until = timespec_to_ktime(ts);
-	}
+	if (timeout)
+		until = timespec_to_ktime(*timeout);
 
 	/*
 	 * Note that aio_read_events() is being called as the conditional - i.e.
@@ -1363,9 +1357,21 @@ static long read_events(struct kioctx *ctx, long min_nr, long nr,
 				aio_read_events(ctx, min_nr, nr, event, &ret),
 				until);
 
-	if (!ret && signal_pending(current))
-		ret = -EINTR;
+	return ret;
+}
 
+static long do_io_getevents(aio_context_t ctx_id, long min_nr, long nr,
+			    struct io_event __user *events,
+			    const struct timespec *timeout)
+{
+	struct kioctx *ioctx = lookup_ioctx(ctx_id);
+	long ret = -EINVAL;
+
+	if (likely(ioctx)) {
+		if (likely(min_nr <= nr && min_nr >= 0))
+			ret = read_events(ioctx, min_nr, nr, events, timeout);
+		percpu_ref_put(&ioctx->users);
+	}
 	return ret;
 }
 
@@ -1875,14 +1881,62 @@ SYSCALL_DEFINE5(io_getevents, aio_context_t, ctx_id,
 		struct io_event __user *, events,
 		struct timespec __user *, timeout)
 {
-	struct kioctx *ioctx = lookup_ioctx(ctx_id);
-	long ret = -EINVAL;
+	struct timespec ts;
+	struct timespec *tsp = NULL;
+	long ret;
 
-	if (likely(ioctx)) {
-		if (likely(min_nr <= nr && min_nr >= 0))
-			ret = read_events(ioctx, min_nr, nr, events, timeout);
-		percpu_ref_put(&ioctx->users);
+	if (timeout) {
+		if (copy_from_user(&ts, timeout, sizeof(ts)))
+			return -EFAULT;
+		tsp = &ts;
 	}
+
+	ret = do_io_getevents(ctx_id, min_nr, nr, events, tsp);
+	if (!ret && signal_pending(current))
+		ret = -EINTR;
+	return ret;
+}
+
+struct __aio_sigset {
+	const sigset_t __user *sigmask;
+	size_t sigsetsize;
+};
+
+SYSCALL_DEFINE6(io_pgetevents, aio_context_t, ctx_id,
+		long, min_nr,
+		long, nr,
+		struct io_event __user *, events,
+		struct __kernel_timespec __user *, timeout,
+		const struct __aio_sigset __user *, usig)
+{
+	struct __aio_sigset ksig = { NULL, };
+	struct timespec64 ts64;
+	struct timespec ts;
+	struct timespec *tsp = NULL;
+	bool interrupted;
+	int ret;
+
+	if (timeout) {
+		if (get_timespec64(&ts64, timeout))
+			return -EFAULT;
+		ts = timespec64_to_timespec(ts64);
+		tsp = &ts;
+	}
+
+	if (usig && copy_from_user(&ksig, usig, sizeof(ksig)))
+		return -EFAULT;
+
+	ret = set_user_sigmask(ksig.sigmask, ksig.sigsetsize);
+	if (ret)
+		return ret;
+
+	ret = do_io_getevents(ctx_id, min_nr, nr, events, tsp);
+
+	interrupted = signal_pending(current);
+	restore_saved_sigmask_unless(interrupted);
+	if (interrupted && !ret)
+		ret = -ERESTARTNOHAND;
+
 	return ret;
 }
 
@@ -1894,16 +1948,60 @@ COMPAT_SYSCALL_DEFINE5(io_getevents, compat_aio_context_t, ctx_id,
 		       struct compat_timespec __user *, timeout)
 {
 	struct timespec t;
-	struct timespec __user *ut = NULL;
+	struct timespec *tsp = NULL;
+	long ret;
 
 	if (timeout) {
 		if (compat_get_timespec(&t, timeout))
 			return -EFAULT;
-
-		ut = compat_alloc_user_space(sizeof(*ut));
-		if (copy_to_user(ut, &t, sizeof(t)))
-			return -EFAULT;
+		tsp = &t;
 	}
-	return sys_io_getevents(ctx_id, min_nr, nr, events, ut);
+
+	ret = do_io_getevents(ctx_id, min_nr, nr, events, tsp);
+	if (!ret && signal_pending(current))
+		ret = -EINTR;
+	return ret;
+}
+
+struct __compat_aio_sigset {
+	compat_uptr_t sigmask;
+	compat_size_t sigsetsize;
+};
+
+COMPAT_SYSCALL_DEFINE6(io_pgetevents, compat_aio_context_t, ctx_id,
+		       compat_long_t, min_nr,
+		       compat_long_t, nr,
+		       struct io_event __user *, events,
+		       struct compat_timespec __user *, timeout,
+		       const struct __compat_aio_sigset __user *, usig)
+{
+	struct __compat_aio_sigset ksig = { 0, };
+	struct timespec t;
+	struct timespec *tsp = NULL;
+	bool interrupted;
+	int ret;
+
+	if (timeout) {
+		if (compat_get_timespec(&t, timeout))
+			return -EFAULT;
+		tsp = &t;
+	}
+
+	if (usig && copy_from_user(&ksig, usig, sizeof(ksig)))
+		return -EFAULT;
+
+	ret = set_compat_user_sigmask(compat_ptr(ksig.sigmask),
+				      ksig.sigsetsize);
+	if (ret)
+		return ret;
+
+	ret = do_io_getevents(ctx_id, min_nr, nr, events, tsp);
+
+	interrupted = signal_pending(current);
+	restore_saved_sigmask_unless(interrupted);
+	if (interrupted && !ret)
+		ret = -ERESTARTNOHAND;
+
+	return ret;
 }
 #endif

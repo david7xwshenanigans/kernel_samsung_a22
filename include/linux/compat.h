@@ -141,6 +141,9 @@ struct compat_timex {
 struct timex;
 int compat_get_timex(struct timex *, const struct compat_timex __user *);
 int compat_put_timex(struct compat_timex __user *, const struct timex *);
+struct __compat_aio_sigset;
+int set_compat_user_sigmask(const compat_sigset_t __user *umask,
+			    size_t sigsetsize);
 
 #define _COMPAT_NSIG_WORDS	(_COMPAT_NSIG / _COMPAT_NSIG_BPW)
 
@@ -549,6 +552,12 @@ asmlinkage long compat_sys_io_getevents(compat_aio_context_t ctx_id,
 					compat_long_t nr,
 					struct io_event __user *events,
 					struct compat_timespec __user *timeout);
+asmlinkage long compat_sys_io_pgetevents(compat_aio_context_t ctx_id,
+					 compat_long_t min_nr,
+					 compat_long_t nr,
+					 struct io_event __user *events,
+					 struct compat_timespec __user *timeout,
+					 const struct __compat_aio_sigset __user *usig);
 asmlinkage long compat_sys_io_submit(compat_aio_context_t ctx_id, int nr,
 				     u32 __user *iocb);
 asmlinkage long compat_sys_mount(const char __user *dev_name,
