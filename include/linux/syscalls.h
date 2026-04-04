@@ -77,6 +77,7 @@ union bpf_attr;
 #include <linux/types.h>
 #include <linux/aio_abi.h>
 #include <linux/capability.h>
+#include <uapi/linux/landlock.h>
 #include <linux/signal.h>
 #include <linux/list.h>
 #include <linux/bug.h>
@@ -995,5 +996,12 @@ asmlinkage long sys_statx(int dfd, const char __user *path, unsigned flags,
 asmlinkage long sys_pidfd_send_signal(int pidfd, int sig,
 				       siginfo_t __user *info,
 				       unsigned int flags);
+asmlinkage long sys_landlock_create_ruleset(
+		const struct landlock_ruleset_attr __user *attr,
+		size_t size, u32 flags);
+asmlinkage long sys_landlock_add_rule(int ruleset_fd,
+		enum landlock_rule_type rule_type,
+		const void __user *rule_attr, u32 flags);
+asmlinkage long sys_landlock_restrict_self(int ruleset_fd, u32 flags);
 
 #endif

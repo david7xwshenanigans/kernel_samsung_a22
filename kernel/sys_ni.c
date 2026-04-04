@@ -270,6 +270,9 @@ cond_syscall(sys_fsmount);
 cond_syscall(sys_fspick);
 cond_syscall(sys_clone3);
 cond_syscall(sys_mount_setattr);
+cond_syscall(sys_landlock_create_ruleset);
+cond_syscall(sys_landlock_add_rule);
+cond_syscall(sys_landlock_restrict_self);
 cond_syscall(sys_process_mrelease);
 
 /* memory protection keys */

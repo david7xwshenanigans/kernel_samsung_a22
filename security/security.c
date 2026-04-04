@@ -813,6 +813,11 @@ int security_sb_alloc(struct super_block *sb)
 	return call_int_hook(sb_alloc_security, 0, sb);
 }
 
+void security_sb_delete(struct super_block *sb)
+{
+	call_void_hook(sb_delete, sb);
+}
+
 void security_sb_free(struct super_block *sb)
 {
 	call_void_hook(sb_free_security, sb);
@@ -862,7 +867,7 @@ int security_sb_pivotroot(const struct path *old_path, const struct path *new_pa
 
 int security_move_mount(const struct path *from_path, const struct path *to_path)
 {
-	return 0;
+	return call_int_hook(move_mount, 0, from_path, to_path);
 }
 
 int security_sb_set_mnt_opts(struct super_block *sb,

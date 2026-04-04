@@ -236,6 +236,7 @@ source security/loadpin/Kconfig
 source security/yama/Kconfig
 source security/safesetid/Kconfig
 source security/lockdown/Kconfig
+source security/landlock/Kconfig
 
 source security/integrity/Kconfig
 
@@ -307,4 +308,3 @@ source "security/samsung/proca/gaf/Kconfig" # ADDED BY LEGO AUTOMATICALLY: DO NO
 source "security/samsung/dsms/Kconfig" # ADDED BY LEGO AUTOMATICALLY: DO NOT SUBMIT
 source "security/samsung/five/Kconfig" # ADDED BY LEGO AUTOMATICALLY: DO NOT SUBMIT
 endmenu
-
