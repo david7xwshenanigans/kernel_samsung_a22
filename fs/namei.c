@@ -3914,7 +3914,7 @@ struct file *do_file_open_root(struct dentry *dentry, struct vfsmount *mnt,
 	return file;
 }
 
-static struct dentry *filename_create(int dfd, struct filename *name,
+static struct dentry *filename_create(int dfd, struct filename **namep,
 				struct path *path, unsigned int lookup_flags)
 {
 	struct dentry *dentry = ERR_PTR(-EEXIST);
@@ -3923,6 +3923,7 @@ static struct dentry *filename_create(int dfd, struct filename *name,
 	int err2;
 	int error;
 	bool is_dir = (lookup_flags & LOOKUP_DIRECTORY);
+	struct filename *name = *namep;
 
 	/*
 	 * Note that only LOOKUP_REVAL and LOOKUP_DIRECTORY matter here. Any
@@ -3931,6 +3932,7 @@ static struct dentry *filename_create(int dfd, struct filename *name,
 	lookup_flags &= LOOKUP_REVAL;
 
 	name = filename_parentat(dfd, name, lookup_flags, path, &last, &type);
+	*namep = name;
 	if (IS_ERR(name))
 		return ERR_CAST(name);
 
@@ -3987,7 +3989,7 @@ struct dentry *kern_path_create(int dfd, const char *pathname,
 				struct path *path, unsigned int lookup_flags)
 {
 	struct filename *filename = getname_kernel(pathname);
-	struct dentry *res = filename_create(dfd, filename, path, lookup_flags);
+	struct dentry *res = filename_create(dfd, &filename, path, lookup_flags);
 
 	if (!IS_ERR(filename))
 		putname(filename);
@@ -4008,7 +4010,7 @@ inline struct dentry *user_path_create(int dfd, const char __user *pathname,
 				struct path *path, unsigned int lookup_flags)
 {
 	struct filename *filename = getname(pathname);
-	struct dentry *res = filename_create(dfd, filename, path, lookup_flags);
+	struct dentry *res = filename_create(dfd, &filename, path, lookup_flags);
 
 	if (!IS_ERR(filename))
 		putname(filename);
@@ -4156,7 +4158,7 @@ int do_mkdirat(int dfd, struct filename *name, umode_t mode)
 	unsigned int lookup_flags = LOOKUP_DIRECTORY;
 
 retry:
-	dentry = filename_create(dfd, name, &path, lookup_flags);
+	dentry = filename_create(dfd, &name, &path, lookup_flags);
 	error = PTR_ERR(dentry);
 	if (IS_ERR(dentry))
 		goto out_putname;
@@ -4503,7 +4505,7 @@ int do_symlinkat(struct filename *from, int newdfd, struct filename *to)
 		goto out_putnames;
 	}
 retry:
-	dentry = filename_create(newdfd, to, &path, lookup_flags);
+	dentry = filename_create(newdfd, &to, &path, lookup_flags);
 	error = PTR_ERR(dentry);
 	if (IS_ERR(dentry))
 		goto out_putnames;
@@ -4663,7 +4665,7 @@ retry:
 	if (error)
 		goto out_putnames;
 
-	new_dentry = filename_create(newdfd, new, &new_path,
+	new_dentry = filename_create(newdfd, &new, &new_path,
 					(how & LOOKUP_REVAL));
 	error = PTR_ERR(new_dentry);
 	if (IS_ERR(new_dentry))
