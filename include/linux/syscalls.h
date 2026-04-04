@@ -37,6 +37,7 @@ struct old_utsname;
 struct pollfd;
 struct rlimit;
 struct rlimit64;
+struct rseq;
 struct rusage;
 struct sched_param;
 struct sched_attr;
@@ -953,6 +954,8 @@ asmlinkage long sys_pkey_mprotect(unsigned long start, size_t len,
 				  unsigned long prot, int pkey);
 asmlinkage long sys_pkey_alloc(unsigned long flags, unsigned long init_val);
 asmlinkage long sys_pkey_free(int pkey);
+asmlinkage long sys_rseq(struct rseq __user *rseq, u32 rseq_len,
+			 int flags, u32 sig);
 asmlinkage long sys_statx(int dfd, const char __user *path, unsigned flags,
 			  unsigned mask, struct statx __user *buffer);
 asmlinkage long sys_pidfd_send_signal(int pidfd, int sig,

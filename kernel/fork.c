@@ -2223,6 +2223,7 @@ static __latent_entropy struct task_struct *copy_process(
 	 * before holding sighand lock.
 	 */
 	copy_seccomp(p);
+	rseq_fork(p, clone_flags);
 
 	/*
 	 * Process group and session signals need to be delivered to just the

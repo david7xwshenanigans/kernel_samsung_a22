@@ -635,6 +635,8 @@ static void handle_signal(struct ksignal *ksig, struct pt_regs *regs)
 	int usig = ksig->sig;
 	int ret;
 
+	rseq_signal_deliver(ksig, regs);
+
 	/*
 	 * Set up the stack frame
 	 */

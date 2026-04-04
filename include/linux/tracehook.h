@@ -191,6 +191,7 @@ static inline void tracehook_notify_resume(struct pt_regs *regs)
 		task_work_run();
 
 	mem_cgroup_handle_over_high();
+	rseq_handle_notify_resume(NULL, regs);
 }
 
 #endif	/* <linux/tracehook.h> */
