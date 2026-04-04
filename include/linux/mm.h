@@ -2436,6 +2436,10 @@ extern unsigned long get_unmapped_area(struct file *, unsigned long, unsigned lo
 extern unsigned long mmap_region(struct file *file, unsigned long addr,
 	unsigned long len, vm_flags_t vm_flags, unsigned long pgoff,
 	struct list_head *uf);
+#define mmap_read_lock(mm)	down_read(&(mm)->mmap_sem)
+#define mmap_read_unlock(mm)	up_read(&(mm)->mmap_sem)
+#define mmap_write_lock(mm)	down_write(&(mm)->mmap_sem)
+#define mmap_write_unlock(mm)	up_write(&(mm)->mmap_sem)
 extern unsigned long do_mmap(struct file *file, unsigned long addr,
 	unsigned long len, unsigned long prot, unsigned long flags,
 	vm_flags_t vm_flags, unsigned long pgoff, unsigned long *populate,
