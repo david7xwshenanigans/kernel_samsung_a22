@@ -141,15 +141,16 @@ struct compat_timex {
 struct timex;
 int compat_get_timex(struct timex *, const struct compat_timex __user *);
 int compat_put_timex(struct compat_timex __user *, const struct timex *);
-struct __compat_aio_sigset;
-int set_compat_user_sigmask(const compat_sigset_t __user *umask,
-			    size_t sigsetsize);
 
 #define _COMPAT_NSIG_WORDS	(_COMPAT_NSIG / _COMPAT_NSIG_BPW)
 
 typedef struct {
 	compat_sigset_word	sig[_COMPAT_NSIG_WORDS];
 } compat_sigset_t;
+
+struct __compat_aio_sigset;
+int set_compat_user_sigmask(const compat_sigset_t __user *umask,
+			    size_t sigsetsize);
 
 struct compat_sigaction {
 #ifndef __ARCH_HAS_IRIX_SIGACTION
