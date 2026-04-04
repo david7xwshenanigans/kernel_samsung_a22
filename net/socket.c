@@ -1567,12 +1567,12 @@ struct file *do_accept(struct file *file, unsigned file_flags,
 {
 	struct socket *sock, *newsock;
 	struct file *newfile;
-	int err, len;
+	int err = -EBADF, len;
 	struct sockaddr_storage address;
 
-	sock = sock_from_file(file);
+	sock = sock_from_file(file, &err);
 	if (!sock)
-		return ERR_PTR(-ENOTSOCK);
+		return ERR_PTR(err);
 
 	newsock = sock_alloc();
 	if (!newsock)
@@ -1720,11 +1720,10 @@ int __sys_connect_file(struct file *file, struct sockaddr_storage *address,
 		       int addrlen, int file_flags)
 {
 	struct socket *sock;
-	int err;
+	int err = -EBADF;
 
-	sock = sock_from_file(file);
+	sock = sock_from_file(file, &err);
 	if (!sock) {
-		err = -ENOTSOCK;
 		goto out;
 	}
 

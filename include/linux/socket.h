@@ -12,6 +12,7 @@
 
 struct pid;
 struct cred;
+struct socket;
 
 #define __sockaddr_check_size(size)	\
 	BUILD_BUG_ON(((size) > sizeof(struct __kernel_sockaddr_storage)))
