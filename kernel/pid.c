@@ -516,12 +516,31 @@ SYSCALL_DEFINE2(pidfd_open, pid_t, pid, unsigned int, flags)
 	return fd;
 }
 
-static struct pid *pidfd_to_pid(const struct file *file)
+struct pid *pidfd_pid(const struct file *file)
 {
 	if (file->f_op == &pidfd_fops)
 		return file->private_data;
 
 	return tgid_pidfd_to_pid(file);
+}
+
+struct pid *pidfd_get_pid(unsigned int fd, unsigned int *flags)
+{
+	struct fd f;
+	struct pid *pid;
+
+	f = fdget(fd);
+	if (!f.file)
+		return ERR_PTR(-EBADF);
+
+	pid = pidfd_pid(f.file);
+	if (!IS_ERR(pid)) {
+		get_pid(pid);
+		*flags = f.file->f_flags;
+	}
+
+	fdput(f);
+	return pid;
 }
 
 static struct file *__pidfd_fget(struct task_struct *task, int fd)
@@ -594,7 +613,7 @@ SYSCALL_DEFINE3(pidfd_getfd, int, pidfd, int, fd, unsigned int, flags)
 	if (!f.file)
 		return -EBADF;
 
-	pid = pidfd_to_pid(f.file);
+	pid = pidfd_pid(f.file);
 	if (IS_ERR(pid))
 		ret = PTR_ERR(pid);
 	else

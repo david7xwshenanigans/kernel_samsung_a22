@@ -258,6 +258,7 @@ cond_syscall(sys_execveat);
 /* membarrier */
 cond_syscall(sys_membarrier);
 cond_syscall(sys_rseq);
+cond_syscall(sys_process_mrelease);
 
 /* memory protection keys */
 cond_syscall(sys_pkey_mprotect);

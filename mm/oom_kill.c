@@ -34,6 +34,7 @@
 #include <linux/memcontrol.h>
 #include <linux/mempolicy.h>
 #include <linux/security.h>
+#include <linux/pid.h>
 #include <linux/ptrace.h>
 #include <linux/freezer.h>
 #include <linux/ftrace.h>
@@ -1137,4 +1138,67 @@ void pagefault_out_of_memory(void)
 
 	if (__ratelimit(&pfoom_rs))
 		pr_warn("Huh VM_FAULT_OOM leaked out to the #PF handler. Retrying PF\n");
+}
+
+SYSCALL_DEFINE2(process_mrelease, int, pidfd, unsigned int, flags)
+{
+#ifdef CONFIG_MMU
+	struct mm_struct *mm = NULL;
+	struct task_struct *task;
+	struct task_struct *p;
+	struct task_struct *reap_task = NULL;
+	unsigned int f_flags;
+	bool reap = false;
+	struct pid *pid;
+	long ret = 0;
+
+	if (flags)
+		return -EINVAL;
+
+	pid = pidfd_get_pid(pidfd, &f_flags);
+	if (IS_ERR(pid))
+		return PTR_ERR(pid);
+
+	task = get_pid_task(pid, PIDTYPE_TGID);
+	if (!task) {
+		ret = -ESRCH;
+		goto put_pid;
+	}
+
+	p = find_lock_task_mm(task);
+	if (!p) {
+		ret = -ESRCH;
+		goto put_task;
+	}
+
+	if (mmget_not_zero(p->mm)) {
+		mm = p->mm;
+		if (task_will_free_mem(p)) {
+			reap = true;
+			get_task_struct(p);
+			reap_task = p;
+		} else if (!test_bit(MMF_OOM_SKIP, &mm->flags))
+			ret = -EINVAL;
+	}
+	task_unlock(p);
+
+	if (!reap)
+		goto drop_mm;
+
+	if (!oom_reap_task_mm(reap_task, mm))
+		ret = -EAGAIN;
+
+drop_mm:
+	if (mm)
+		mmput(mm);
+	if (reap_task)
+		put_task_struct(reap_task);
+put_task:
+	put_task_struct(task);
+put_pid:
+	put_pid(pid);
+	return ret;
+#else
+	return -ENOSYS;
+#endif
 }
