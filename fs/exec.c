@@ -52,6 +52,7 @@
 #include <linux/security.h>
 #include <linux/syscalls.h>
 #include <linux/tsacct_kern.h>
+#include <linux/io_uring.h>
 #include <linux/cn_proc.h>
 #include <linux/audit.h>
 #include <linux/tracehook.h>
@@ -1931,6 +1932,8 @@ static int __do_execve_file(int fd, struct filename *filename,
 	/* We're below the limit (still or again), so we don't want to make
 	 * further execve() calls fail. */
 	current->flags &= ~PF_NPROC_EXCEEDED;
+
+	io_uring_task_cancel();
 
 	retval = unshare_files(&displaced);
 	if (retval)

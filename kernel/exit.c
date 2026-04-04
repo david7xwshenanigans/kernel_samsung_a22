@@ -19,6 +19,7 @@
 #include <linux/personality.h>
 #include <linux/tty.h>
 #include <linux/iocontext.h>
+#include <linux/io_uring.h>
 #include <linux/key.h>
 #include <linux/cpu.h>
 #include <linux/acct.h>
@@ -874,6 +875,7 @@ void __noreturn do_exit(long code)
 		schedule();
 	}
 
+	io_uring_files_cancel();
 	exit_signals(tsk);  /* sets PF_EXITING */
 
 	/* sync mm's RSS info before statistics gathering */

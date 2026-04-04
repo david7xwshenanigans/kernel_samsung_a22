@@ -41,6 +41,7 @@
 
 #include "sched.h"
 #include "../workqueue_internal.h"
+#include "../../fs/io-wq.h"
 #include "../smpboot.h"
 
 #include <mt-plat/perf_tracker.h>
@@ -4839,12 +4840,17 @@ static void __sched notrace __schedule(bool preempt)
 			 * whether it wants to wake up a task to maintain
 			 * concurrency.
 			 */
-			if (prev->flags & PF_WQ_WORKER) {
-				struct task_struct *to_wakeup;
+			if (prev->flags & (PF_WQ_WORKER | PF_IO_WORKER)) {
+				if (prev->flags & PF_WQ_WORKER) {
+					struct task_struct *to_wakeup;
 
-				to_wakeup = wq_worker_sleeping(prev);
-				if (to_wakeup)
-					try_to_wake_up_local(to_wakeup, &rf);
+					to_wakeup = wq_worker_sleeping(prev);
+					if (to_wakeup)
+						try_to_wake_up_local(to_wakeup,
+								     &rf);
+				} else {
+					io_wq_worker_sleeping(prev);
+				}
 			}
 		}
 		switch_count = &prev->nvcsw;
@@ -4921,6 +4927,12 @@ static inline void sched_submit_work(struct task_struct *tsk)
 		blk_schedule_flush_plug(tsk);
 }
 
+static void sched_update_worker(struct task_struct *tsk)
+{
+	if (tsk->flags & PF_IO_WORKER)
+		io_wq_worker_running(tsk);
+}
+
 asmlinkage __visible void __sched schedule(void)
 {
 	struct task_struct *tsk = current;
@@ -4931,6 +4943,7 @@ asmlinkage __visible void __sched schedule(void)
 		__schedule(false);
 		sched_preempt_enable_no_resched();
 	} while (need_resched());
+	sched_update_worker(tsk);
 }
 EXPORT_SYMBOL(schedule);
 

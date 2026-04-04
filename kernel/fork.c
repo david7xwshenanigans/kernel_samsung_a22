@@ -91,6 +91,7 @@
 #include <linux/sysctl.h>
 #include <linux/kcov.h>
 #include <linux/livepatch.h>
+#include <linux/io_uring.h>
 #include <linux/thread_info.h>
 #include <linux/cpufreq_times.h>
 #include <linux/scs.h>
@@ -426,6 +427,7 @@ void __put_task_struct(struct task_struct *tsk)
 	WARN_ON(atomic_read(&tsk->usage));
 	WARN_ON(tsk == current);
 
+	io_uring_free(tsk);
 	cgroup_free(tsk);
 	task_numa_free(tsk, true);
 	security_task_free(tsk);
@@ -1974,7 +1976,7 @@ static __latent_entropy struct task_struct *copy_process(
 		goto bad_fork_cleanup_count;
 
 	delayacct_tsk_init(p);	/* Must remain after dup_task_struct() */
-	p->flags &= ~(PF_SUPERPRIV | PF_WQ_WORKER | PF_IDLE);
+	p->flags &= ~(PF_SUPERPRIV | PF_WQ_WORKER | PF_IO_WORKER | PF_IDLE);
 	p->flags |= PF_FORKNOEXEC;
 	INIT_LIST_HEAD(&p->children);
 	INIT_LIST_HEAD(&p->sibling);
@@ -1989,6 +1991,11 @@ static __latent_entropy struct task_struct *copy_process(
 	p->utimescaled = p->stimescaled = 0;
 #endif
 	prev_cputime_init(&p->prev_cputime);
+
+#ifdef CONFIG_IO_URING
+	p->io_uring = NULL;
+#endif
+	p->pf_io_worker = NULL;
 
 #ifdef CONFIG_VIRT_CPU_ACCOUNTING_GEN
 	seqcount_init(&p->vtime.seqcount);
@@ -2515,6 +2522,23 @@ pid_t kernel_thread(int (*fn)(void *), void *arg, unsigned long flags)
 {
 	return _do_fork(flags|CLONE_VM|CLONE_UNTRACED, (unsigned long)fn,
 		(unsigned long)arg, NULL, NULL, 0);
+}
+
+struct task_struct *create_io_thread(int (*fn)(void *), void *arg, int node)
+{
+	unsigned long flags = CLONE_FS | CLONE_FILES | CLONE_SIGHAND |
+			      CLONE_THREAD | CLONE_IO;
+	struct task_struct *tsk;
+
+	tsk = copy_process((flags | CLONE_VM | CLONE_UNTRACED) & ~CSIGNAL,
+			   (unsigned long)fn, (unsigned long)arg, NULL, NULL,
+			   NULL, NULL, 0, 0, node);
+	if (IS_ERR(tsk))
+		return tsk;
+
+	tsk->flags |= PF_IO_WORKER;
+	siginitsetinv(&tsk->blocked, sigmask(SIGKILL) | sigmask(SIGSTOP));
+	return tsk;
 }
 
 #ifdef __ARCH_WANT_SYS_FORK

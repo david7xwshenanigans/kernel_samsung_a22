@@ -38,6 +38,7 @@ struct cfs_rq;
 struct fs_struct;
 struct futex_pi_state;
 struct io_context;
+struct io_uring_task;
 struct mempolicy;
 struct nameidata;
 struct nsproxy;
@@ -987,6 +988,9 @@ struct task_struct {
 	/* CLONE_CHILD_CLEARTID: */
 	int __user			*clear_child_tid;
 
+	/* PF_IO_WORKER */
+	void				*pf_io_worker;
+
 	u64				utime;
 	u64				stime;
 #ifdef CONFIG_ARCH_HAS_SCALED_CPUTIME
@@ -1068,6 +1072,10 @@ struct task_struct {
 
 	/* Open file information: */
 	struct files_struct		*files;
+
+#ifdef CONFIG_IO_URING
+	struct io_uring_task		*io_uring;
+#endif
 
 	/* Namespaces: */
 	struct nsproxy			*nsproxy;
@@ -1602,9 +1610,10 @@ extern struct pid *cad_pid;
 /*
  * Per process flags
  */
+#define PF_VCPU			0x00000001	/* I'm a virtual CPU */
 #define PF_IDLE			0x00000002	/* I am an IDLE thread */
 #define PF_EXITING		0x00000004	/* Getting shut down */
-#define PF_VCPU			0x00000010	/* I'm a virtual CPU */
+#define PF_IO_WORKER		0x00000010	/* Task is an IO worker */
 #define PF_WQ_WORKER		0x00000020	/* I'm a workqueue worker */
 #define PF_FORKNOEXEC		0x00000040	/* Forked but didn't exec */
 #define PF_MCE_PROCESS		0x00000080      /* Process policy on mce errors */
