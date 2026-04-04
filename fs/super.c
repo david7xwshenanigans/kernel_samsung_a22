@@ -36,6 +36,8 @@
 #include <linux/fsnotify.h>
 #include <linux/lockdep.h>
 #include <linux/user_namespace.h>
+#include <linux/fs_context.h>
+#include <uapi/linux/mount.h>
 #include "internal.h"
 
 /* @fs.sec -- 89e449513e5bea6196d9aaf62a6936ae -- */

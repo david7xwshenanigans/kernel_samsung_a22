@@ -74,6 +74,14 @@ static unsigned int mp_hash_mask __read_mostly;
 static unsigned int mp_hash_shift __read_mostly;
 
 static __initdata unsigned long mhash_entries;
+static int attach_recursive_mnt(struct mount *source_mnt,
+			struct mount *dest_mnt,
+			struct mountpoint *dest_mp,
+			struct path *parent_path);
+static struct mountpoint *lock_mount(struct path *path);
+static void unlock_mount(struct mountpoint *where);
+static bool mount_too_revealing(struct vfsmount *mnt, int *new_mnt_flags);
+
 static int __init set_mhash_entries(char *str)
 {
 	if (!str)
@@ -3678,8 +3686,6 @@ static void rkp_populate_sb(char *mount_point, struct vfsmount *mnt)
 	}
 }
 #endif
-
-static bool mount_too_revealing(struct vfsmount *mnt, int *new_mnt_flags);
 
 /*
  * create a new mount for userspace and request it to be added into the
