@@ -1140,7 +1140,8 @@ void pagefault_out_of_memory(void)
 		pr_warn("Huh VM_FAULT_OOM leaked out to the #PF handler. Retrying PF\n");
 }
 
-SYSCALL_DEFINE2(process_mrelease, int, pidfd, unsigned int, flags)
+SYSCALL_DEFINE2(process_mrelease, int, process_pidfd,
+		unsigned int, release_flags)
 {
 #ifdef CONFIG_MMU
 	struct mm_struct *mm = NULL;
