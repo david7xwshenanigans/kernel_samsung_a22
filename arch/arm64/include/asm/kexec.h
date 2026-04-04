@@ -93,6 +93,28 @@ static inline void crash_prepare_suspend(void) {}
 static inline void crash_post_resume(void) {}
 #endif
 
+#define ARCH_HAS_KIMAGE_ARCH
+
+struct kimage_arch {
+	void *dtb;
+	phys_addr_t dtb_mem;
+	void *elf_headers;
+	unsigned long elf_headers_sz;
+	unsigned long elf_load_addr;
+};
+
+#ifdef CONFIG_KEXEC_FILE
+struct kexec_file_ops;
+extern struct kexec_file_ops kexec_image_ops;
+
+struct kimage;
+
+extern int load_other_segments(struct kimage *image,
+		unsigned long kernel_load_addr, unsigned long kernel_size,
+		char *initrd, unsigned long initrd_len,
+		char *cmdline);
+#endif
+
 #endif /* __ASSEMBLY__ */
 
 #endif

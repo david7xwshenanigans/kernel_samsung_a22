@@ -149,6 +149,7 @@ void machine_kexec(struct kimage *kimage)
 	void *reboot_code_buffer;
 	bool in_kexec_crash = (kimage == kexec_crash_image);
 	bool stuck_cpus = cpus_are_stuck_in_kernel();
+	unsigned long dtb = 0;
 
 	/*
 	 * New cpus may have become stuck_in_kernel after we loaded the image.
@@ -207,9 +208,11 @@ void machine_kexec(struct kimage *kimage)
 	 * position and transfers control to the image entry point when the
 	 * relocation is complete.
 	 */
+	if (kimage->file_mode)
+		dtb = kimage->arch.dtb_mem;
 
 	cpu_soft_restart(kimage != kexec_crash_image,
-		reboot_code_buffer_phys, kimage->head, kimage->start, 0);
+		reboot_code_buffer_phys, kimage->head, kimage->start, dtb);
 
 	BUG(); /* Should never get here. */
 }
