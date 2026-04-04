@@ -881,6 +881,8 @@ __SYSCALL(__NR_process_madvise, compat_sys_process_madvise)
 __SYSCALL(__NR_epoll_pwait2, compat_sys_epoll_pwait2)
 #define __NR_quotactl_fd 443
 __SYSCALL(__NR_quotactl_fd, sys_quotactl_fd)
+#define __NR_memfd_secret 447
+__SYSCALL(__NR_memfd_secret, sys_memfd_secret)
 #define __NR_process_mrelease 448
 __SYSCALL(__NR_process_mrelease, sys_process_mrelease)
 

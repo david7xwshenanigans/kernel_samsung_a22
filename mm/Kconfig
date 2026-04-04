@@ -993,4 +993,7 @@ config HIGHATOMIC_PAGEBLOCKS
 	  highatomic pageblocks.
 	  This value limits max number of highatomic pageblocks.
 
+config SECRETMEM
+	def_bool ARCH_HAS_SET_DIRECT_MAP && !EMBEDDED
+
 source "mm/sec_mm/Kconfig"

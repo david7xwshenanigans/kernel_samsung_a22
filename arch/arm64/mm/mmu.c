@@ -31,6 +31,7 @@
 #include <linux/fs.h>
 #include <linux/io.h>
 #include <linux/mm.h>
+#include <linux/set_memory.h>
 #include <linux/vmalloc.h>
 
 #include <asm/barrier.h>
@@ -454,7 +455,7 @@ static void __init map_mem(pgd_t *pgd)
 	struct memblock_region *reg;
 	int flags = 0;
 
-	if (debug_pagealloc_enabled())
+	if (can_set_direct_map())
 		flags = NO_BLOCK_MAPPINGS | NO_CONT_MAPPINGS;
 
 	/*
