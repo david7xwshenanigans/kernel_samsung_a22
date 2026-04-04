@@ -1153,10 +1153,10 @@ SYSCALL_DEFINE2(process_mrelease, int, process_pidfd,
 	struct pid *pid;
 	long ret = 0;
 
-	if (flags)
+	if (release_flags)
 		return -EINVAL;
 
-	pid = pidfd_get_pid(pidfd, &f_flags);
+	pid = pidfd_get_pid(process_pidfd, &f_flags);
 	if (IS_ERR(pid))
 		return PTR_ERR(pid);
 
