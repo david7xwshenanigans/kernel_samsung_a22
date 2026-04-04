@@ -63,6 +63,7 @@ struct utimbuf;
 struct mq_attr;
 struct compat_stat;
 struct compat_timeval;
+struct clone_args;
 struct robust_list_head;
 struct getcpu_cache;
 struct old_linux_dirent;
@@ -926,6 +927,7 @@ asmlinkage long sys_open_by_handle_at(int mountdirfd,
 asmlinkage long sys_setns(int fd, int nstype);
 asmlinkage long sys_pidfd_open(pid_t pid, unsigned int flags);
 asmlinkage long sys_pidfd_getfd(int pidfd, int fd, unsigned int flags);
+asmlinkage long sys_clone3(struct clone_args __user *uargs, size_t size);
 asmlinkage long sys_process_madvise(int pidfd, const struct iovec __user *vec,
 				    size_t vlen, int behavior,
 				    unsigned int flags);

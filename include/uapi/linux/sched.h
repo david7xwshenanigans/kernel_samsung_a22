@@ -2,6 +2,8 @@
 #ifndef _UAPI_LINUX_SCHED_H
 #define _UAPI_LINUX_SCHED_H
 
+#include <linux/types.h>
+
 /*
  * cloning flags:
  */
@@ -30,6 +32,29 @@
 #define CLONE_NEWPID		0x20000000	/* New pid namespace */
 #define CLONE_NEWNET		0x40000000	/* New network namespace */
 #define CLONE_IO		0x80000000	/* Clone io context */
+
+#define CLONE_CLEAR_SIGHAND	0x100000000ULL
+#define CLONE_INTO_CGROUP	0x200000000ULL
+
+#ifndef __ASSEMBLY__
+struct clone_args {
+	__aligned_u64 flags;
+	__aligned_u64 pidfd;
+	__aligned_u64 child_tid;
+	__aligned_u64 parent_tid;
+	__aligned_u64 exit_signal;
+	__aligned_u64 stack;
+	__aligned_u64 stack_size;
+	__aligned_u64 tls;
+	__aligned_u64 set_tid;
+	__aligned_u64 set_tid_size;
+	__aligned_u64 cgroup;
+};
+#endif
+
+#define CLONE_ARGS_SIZE_VER0	64
+#define CLONE_ARGS_SIZE_VER1	80
+#define CLONE_ARGS_SIZE_VER2	88
 
 /*
  * Scheduling policies

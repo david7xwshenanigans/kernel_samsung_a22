@@ -1468,6 +1468,8 @@ static int copy_sighand(unsigned long clone_flags, struct task_struct *tsk)
 	spin_lock_irq(&current->sighand->siglock);
 	memcpy(sig->action, current->sighand->action, sizeof(sig->action));
 	spin_unlock_irq(&current->sighand->siglock);
+	if (clone_flags & CLONE_CLEAR_SIGHAND)
+		flush_signal_handlers(tsk, 0);
 	return 0;
 }
 
@@ -1846,6 +1848,7 @@ static __latent_entropy struct task_struct *copy_process(
 					unsigned long stack_size,
 					int __user *parent_tidptr,
 					int __user *child_tidptr,
+					int __user *pidfd_ptr,
 					struct pid *pid,
 					int trace,
 					unsigned long tls,
@@ -1900,21 +1903,21 @@ static __latent_entropy struct task_struct *copy_process(
 		int reserved;
 
 		/*
-		 * - CLONE_PARENT_SETTID is useless for pidfds and also
-		 *   parent_tidptr is used to return pidfds.
 		 * - CLONE_DETACHED is blocked so that we can potentially
 		 *   reuse it later for CLONE_PIDFD.
 		 * - CLONE_THREAD is blocked until someone really needs it.
 		 */
-		if (clone_flags &
-		    (CLONE_DETACHED | CLONE_PARENT_SETTID | CLONE_THREAD))
+		if (clone_flags & (CLONE_DETACHED | CLONE_THREAD))
+			return ERR_PTR(-EINVAL);
+		if ((clone_flags & CLONE_PARENT_SETTID) &&
+		    pidfd_ptr == parent_tidptr)
 			return ERR_PTR(-EINVAL);
 
 		/*
-		 * Verify that parent_tidptr is sane so we can potentially
+		 * Verify that pidfd is sane so we can potentially
 		 * reuse it later.
 		 */
-		if (get_user(reserved, parent_tidptr))
+		if (get_user(reserved, pidfd_ptr))
 			return ERR_PTR(-EFAULT);
 
 		if (reserved != 0)
@@ -2127,7 +2130,7 @@ static __latent_entropy struct task_struct *copy_process(
 			goto bad_fork_free_pid;
 
 		pidfd = retval;
-		retval = put_user(pidfd, parent_tidptr);
+		retval = put_user(pidfd, pidfd_ptr);
 		if (retval)
 			goto bad_fork_put_pidfd;
 	}
@@ -2387,8 +2390,8 @@ static inline void init_idle_pids(struct task_struct *idle)
 struct task_struct *fork_idle(int cpu)
 {
 	struct task_struct *task;
-	task = copy_process(CLONE_VM, 0, 0, NULL, NULL, &init_struct_pid, 0, 0,
-			    cpu_to_node(cpu));
+	task = copy_process(CLONE_VM, 0, 0, NULL, NULL, NULL,
+			    &init_struct_pid, 0, 0, cpu_to_node(cpu));
 	if (!IS_ERR(task)) {
 		init_idle_pids(task);
 		init_idle(task, cpu);
@@ -2403,12 +2406,13 @@ struct task_struct *fork_idle(int cpu)
  * It copies the process, and if successful kick-starts
  * it and waits for it to finish using the VM if required.
  */
-long _do_fork(unsigned long clone_flags,
-	      unsigned long stack_start,
-	      unsigned long stack_size,
-	      int __user *parent_tidptr,
-	      int __user *child_tidptr,
-	      unsigned long tls)
+static long _do_fork_pidfd(unsigned long clone_flags,
+			   unsigned long stack_start,
+			   unsigned long stack_size,
+			   int __user *parent_tidptr,
+			   int __user *child_tidptr,
+			   int __user *pidfd,
+			   unsigned long tls)
 {
 	struct task_struct *p;
 	int trace = 0;
@@ -2433,7 +2437,7 @@ long _do_fork(unsigned long clone_flags,
 	}
 
 	p = copy_process(clone_flags, stack_start, stack_size, parent_tidptr,
-			 child_tidptr, NULL, trace, tls, NUMA_NO_NODE);
+			 child_tidptr, pidfd, NULL, trace, tls, NUMA_NO_NODE);
 	add_latent_entropy();
 	/*
 	 * Do this prior waking up the new thread - the thread pointer
@@ -2475,6 +2479,19 @@ long _do_fork(unsigned long clone_flags,
 		nr = PTR_ERR(p);
 	}
 	return nr;
+}
+
+long _do_fork(unsigned long clone_flags,
+	      unsigned long stack_start,
+	      unsigned long stack_size,
+	      int __user *parent_tidptr,
+	      int __user *child_tidptr,
+	      unsigned long tls)
+{
+	return _do_fork_pidfd(clone_flags, stack_start, stack_size,
+			      parent_tidptr, child_tidptr,
+			      (clone_flags & CLONE_PIDFD) ? parent_tidptr : NULL,
+			      tls);
 }
 
 #ifndef CONFIG_HAVE_COPY_THREAD_TLS
@@ -2547,6 +2564,94 @@ SYSCALL_DEFINE5(clone, unsigned long, clone_flags, unsigned long, newsp,
 	return _do_fork(clone_flags, newsp, 0, parent_tidptr, child_tidptr, tls);
 }
 #endif
+
+static int copy_clone_args_from_user(struct clone_args *kargs,
+				     struct clone_args __user *uargs,
+				     size_t usize)
+{
+	BUILD_BUG_ON(offsetofend(struct clone_args, tls) !=
+		     CLONE_ARGS_SIZE_VER0);
+	BUILD_BUG_ON(offsetofend(struct clone_args, set_tid_size) !=
+		     CLONE_ARGS_SIZE_VER1);
+	BUILD_BUG_ON(offsetofend(struct clone_args, cgroup) !=
+		     CLONE_ARGS_SIZE_VER2);
+	BUILD_BUG_ON(sizeof(struct clone_args) != CLONE_ARGS_SIZE_VER2);
+
+	if (unlikely(usize < CLONE_ARGS_SIZE_VER0))
+		return -EINVAL;
+	if (unlikely(usize > PAGE_SIZE))
+		return -E2BIG;
+
+	return copy_struct_from_user(kargs, sizeof(*kargs), uargs, usize);
+}
+
+static bool clone3_stack_valid(struct clone_args *kargs)
+{
+	if (!kargs->stack)
+		return !kargs->stack_size;
+
+#ifdef CONFIG_STACK_GROWSUP
+	return true;
+#else
+	kargs->stack += kargs->stack_size;
+	return true;
+#endif
+}
+
+static bool clone3_args_valid(struct clone_args *kargs)
+{
+	u64 flags = kargs->flags;
+	u64 supported = (u64)(CLONE_VM | CLONE_FS | CLONE_FILES |
+			      CLONE_SIGHAND | CLONE_PIDFD | CLONE_PTRACE |
+			      CLONE_VFORK | CLONE_PARENT | CLONE_THREAD |
+			      CLONE_NEWNS | CLONE_SYSVSEM | CLONE_SETTLS |
+			      CLONE_PARENT_SETTID | CLONE_CHILD_CLEARTID |
+			      CLONE_DETACHED | CLONE_UNTRACED |
+			      CLONE_CHILD_SETTID | CLONE_NEWCGROUP |
+			      CLONE_NEWUTS | CLONE_NEWIPC | CLONE_NEWUSER |
+			      CLONE_NEWPID | CLONE_NEWNET | CLONE_IO) |
+			CLONE_CLEAR_SIGHAND | CLONE_INTO_CGROUP;
+
+	if (flags & ~supported)
+		return false;
+	if (flags & (CLONE_DETACHED | CSIGNAL))
+		return false;
+	if ((flags & (CLONE_SIGHAND | CLONE_CLEAR_SIGHAND)) ==
+	    (CLONE_SIGHAND | CLONE_CLEAR_SIGHAND))
+		return false;
+	if ((flags & CLONE_THREAD) && kargs->exit_signal)
+		return false;
+	if (kargs->exit_signal & ~CSIGNAL)
+		return false;
+	if ((flags & CLONE_PIDFD) && !kargs->pidfd)
+		return false;
+	if (kargs->set_tid || kargs->set_tid_size)
+		return false;
+	if ((flags & CLONE_INTO_CGROUP) || kargs->cgroup)
+		return false;
+
+	return clone3_stack_valid(kargs);
+}
+
+SYSCALL_DEFINE2(clone3, struct clone_args __user *, uargs, size_t, size)
+{
+	int err;
+	struct clone_args kargs;
+
+	err = copy_clone_args_from_user(&kargs, uargs, size);
+	if (err)
+		return err;
+
+	if (!clone3_args_valid(&kargs))
+		return -EINVAL;
+
+	return _do_fork_pidfd(kargs.flags | kargs.exit_signal,
+			      kargs.stack, kargs.stack_size,
+			      u64_to_user_ptr(kargs.parent_tid),
+			      u64_to_user_ptr(kargs.child_tid),
+			      u64_to_user_ptr(kargs.pidfd),
+			      kargs.tls);
+}
 
 void walk_process_tree(struct task_struct *top, proc_visitor visitor, void *data)
 {
