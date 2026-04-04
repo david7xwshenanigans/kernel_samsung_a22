@@ -37,6 +37,8 @@ static inline void eventpoll_init_file(struct file *file)
 
 /* Used to release the epoll bits inside the "struct file" */
 void eventpoll_release_file(struct file *file);
+int do_epoll_ctl(int epfd, int op, int fd, struct epoll_event *epds,
+		 bool nonblock);
 
 /*
  * This is called from inside fs/file_table.c:__fput() to unlink files

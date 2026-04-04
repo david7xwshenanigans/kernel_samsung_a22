@@ -1104,8 +1104,8 @@ static bool process_madvise_behavior_valid(int behavior)
  *  -EBADF  - map exists, but area maps something that isn't a file.
  *  -EAGAIN - a kernel resource was temporarily unavailable.
  */
-static long do_madvise(struct mm_struct *mm, unsigned long start,
-		       size_t len_in, int behavior)
+int do_madvise(struct mm_struct *mm, unsigned long start, size_t len_in,
+	       int behavior)
 {
 	unsigned long end, tmp;
 	struct vm_area_struct *vma, *prev;

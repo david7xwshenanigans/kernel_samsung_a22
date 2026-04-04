@@ -972,8 +972,7 @@ static inline struct open_how build_open_how(int flags, umode_t mode)
 	return how;
 }
 
-static inline int build_open_flags(const struct open_how *how,
-				   struct open_flags *op)
+int build_open_flags(const struct open_how *how, struct open_flags *op)
 {
 	u64 flags = how->flags;
 	int lookup_flags = 0;

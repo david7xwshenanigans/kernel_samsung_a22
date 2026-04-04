@@ -140,6 +140,8 @@ struct open_flags {
 	int intent;
 	int lookup_flags;
 };
+extern int build_open_flags(const struct open_how *how,
+			    struct open_flags *op);
 extern struct file *do_filp_open(int dfd, struct filename *pathname,
 		const struct open_flags *op);
 extern struct file *do_file_open_root(struct dentry *, struct vfsmount *,
@@ -199,6 +201,8 @@ extern void mnt_pin_kill(struct mount *m);
  * fs/nsfs.c
  */
 extern const struct dentry_operations ns_dentry_operations;
+int do_statx(int dfd, const char __user *filename, unsigned flags,
+	     unsigned int mask, struct statx __user *buffer);
 
 /*
  * fs/ioctl.c

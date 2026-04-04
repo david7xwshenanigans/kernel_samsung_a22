@@ -2030,21 +2030,28 @@ SYSCALL_DEFINE1(epoll_create, int, size)
  * the eventpoll file that enables the insertion/removal/change of
  * file descriptors inside the interest set.
  */
-SYSCALL_DEFINE4(epoll_ctl, int, epfd, int, op, int, fd,
-		struct epoll_event __user *, event)
+static inline int epoll_mutex_lock(struct mutex *mutex, int depth,
+				   bool nonblock)
+{
+	if (!nonblock) {
+		mutex_lock_nested(mutex, depth);
+		return 0;
+	}
+	if (mutex_trylock(mutex))
+		return 0;
+	return -EAGAIN;
+}
+
+int do_epoll_ctl(int epfd, int op, int fd, struct epoll_event *epds,
+		 bool nonblock)
 {
 	int error;
 	int full_check = 0;
+	bool ep_locked = false, epmutex_locked = false, tep_locked = false;
 	struct fd f, tf;
 	struct eventpoll *ep;
 	struct epitem *epi;
-	struct epoll_event epds;
 	struct eventpoll *tep = NULL;
-
-	error = -EFAULT;
-	if (ep_op_has_event(op) &&
-	    copy_from_user(&epds, event, sizeof(struct epoll_event)))
-		goto error_return;
 
 	error = -EBADF;
 	f = fdget(epfd);
@@ -2058,12 +2065,12 @@ SYSCALL_DEFINE4(epoll_ctl, int, epfd, int, op, int, fd,
 
 	/* The target file descriptor must support poll */
 	error = -EPERM;
-	if (!tf.file->f_op->poll)
+	if (!file_can_poll(tf.file))
 		goto error_tgt_fput;
 
 	/* Check if EPOLLWAKEUP is allowed */
 	if (ep_op_has_event(op))
-		ep_take_care_of_epollwakeup(&epds);
+		ep_take_care_of_epollwakeup(epds);
 
 	/*
 	 * We have to check that the file structure underneath the file descriptor
@@ -2108,14 +2115,21 @@ SYSCALL_DEFINE4(epoll_ctl, int, epfd, int, op, int, fd,
 	 * deep wakeup paths from forming in parallel through multiple
 	 * EPOLL_CTL_ADD operations.
 	 */
-	mutex_lock_nested(&ep->mtx, 0);
+	error = epoll_mutex_lock(&ep->mtx, 0, nonblock);
+	if (error)
+		goto error_tgt_fput;
+	ep_locked = true;
 	if (op == EPOLL_CTL_ADD) {
 		if (!list_empty(&f.file->f_ep_links) ||
 				ep->gen == loop_check_gen ||
 						is_file_epoll(tf.file)) {
-			full_check = 1;
 			mutex_unlock(&ep->mtx);
-			mutex_lock(&epmutex);
+			ep_locked = false;
+			error = epoll_mutex_lock(&epmutex, 0, nonblock);
+			if (error)
+				goto error_tgt_fput;
+			epmutex_locked = true;
+			full_check = 1;
 			if (is_file_epoll(tf.file)) {
 				error = -ELOOP;
 				if (ep_loop_check(ep, tf.file) != 0)
@@ -2125,10 +2139,16 @@ SYSCALL_DEFINE4(epoll_ctl, int, epfd, int, op, int, fd,
 				list_add(&tf.file->f_tfile_llink,
 							&tfile_check_list);
 			}
-			mutex_lock_nested(&ep->mtx, 0);
+			error = epoll_mutex_lock(&ep->mtx, 0, nonblock);
+			if (error)
+				goto error_tgt_fput;
+			ep_locked = true;
 			if (is_file_epoll(tf.file)) {
 				tep = tf.file->private_data;
-				mutex_lock_nested(&tep->mtx, 1);
+				error = epoll_mutex_lock(&tep->mtx, 1, nonblock);
+				if (error)
+					goto error_tgt_fput;
+				tep_locked = true;
 			}
 		}
 	}
@@ -2144,8 +2164,8 @@ SYSCALL_DEFINE4(epoll_ctl, int, epfd, int, op, int, fd,
 	switch (op) {
 	case EPOLL_CTL_ADD:
 		if (!epi) {
-			epds.events |= POLLERR | POLLHUP;
-			error = ep_insert(ep, &epds, tf.file, fd, full_check);
+			epds->events |= POLLERR | POLLHUP;
+			error = ep_insert(ep, epds, tf.file, fd, full_check);
 		} else
 			error = -EEXIST;
 		break;
@@ -2158,19 +2178,26 @@ SYSCALL_DEFINE4(epoll_ctl, int, epfd, int, op, int, fd,
 	case EPOLL_CTL_MOD:
 		if (epi) {
 			if (!(epi->event.events & EPOLLEXCLUSIVE)) {
-				epds.events |= POLLERR | POLLHUP;
-				error = ep_modify(ep, epi, &epds);
+				epds->events |= POLLERR | POLLHUP;
+				error = ep_modify(ep, epi, epds);
 			}
 		} else
 			error = -ENOENT;
 		break;
 	}
-	if (tep != NULL)
+	if (tep_locked)
 		mutex_unlock(&tep->mtx);
-	mutex_unlock(&ep->mtx);
+	tep_locked = false;
+	if (ep_locked)
+		mutex_unlock(&ep->mtx);
+	ep_locked = false;
 
 error_tgt_fput:
-	if (full_check) {
+	if (tep_locked)
+		mutex_unlock(&tep->mtx);
+	if (ep_locked)
+		mutex_unlock(&ep->mtx);
+	if (epmutex_locked) {
 		clear_tfile_check_list();
 		loop_check_gen++;
 		mutex_unlock(&epmutex);
@@ -2182,6 +2209,18 @@ error_fput:
 error_return:
 
 	return error;
+}
+
+SYSCALL_DEFINE4(epoll_ctl, int, epfd, int, op, int, fd,
+		struct epoll_event __user *, event)
+{
+	struct epoll_event epds;
+
+	if (ep_op_has_event(op) &&
+	    copy_from_user(&epds, event, sizeof(struct epoll_event)))
+		return -EFAULT;
+
+	return do_epoll_ctl(epfd, op, fd, &epds, false);
 }
 
 /*

@@ -1092,14 +1092,17 @@ static int splice_pipe_to_pipe(struct pipe_inode_info *ipipe,
 /*
  * Determine where to splice to/from.
  */
-static long do_splice(struct file *in, loff_t __user *off_in,
-		      struct file *out, loff_t __user *off_out,
-		      size_t len, unsigned int flags)
+long do_splice(struct file *in, loff_t *off_in, struct file *out,
+	       loff_t *off_out, size_t len, unsigned int flags)
 {
 	struct pipe_inode_info *ipipe;
 	struct pipe_inode_info *opipe;
 	loff_t offset;
 	long ret;
+
+	if (unlikely(!(in->f_mode & FMODE_READ) ||
+		     !(out->f_mode & FMODE_WRITE)))
+		return -EBADF;
 
 	ipipe = get_pipe_info(in);
 	opipe = get_pipe_info(out);
@@ -1108,15 +1111,12 @@ static long do_splice(struct file *in, loff_t __user *off_in,
 		if (off_in || off_out)
 			return -ESPIPE;
 
-		if (!(in->f_mode & FMODE_READ))
-			return -EBADF;
-
-		if (!(out->f_mode & FMODE_WRITE))
-			return -EBADF;
-
 		/* Splicing to self would be fun, but... */
 		if (ipipe == opipe)
 			return -EINVAL;
+
+		if ((in->f_flags | out->f_flags) & O_NONBLOCK)
+			flags |= SPLICE_F_NONBLOCK;
 
 		return splice_pipe_to_pipe(ipipe, opipe, len, flags);
 	}
@@ -1127,14 +1127,10 @@ static long do_splice(struct file *in, loff_t __user *off_in,
 		if (off_out) {
 			if (!(out->f_mode & FMODE_PWRITE))
 				return -EINVAL;
-			if (copy_from_user(&offset, off_out, sizeof(loff_t)))
-				return -EFAULT;
+			offset = *off_out;
 		} else {
 			offset = out->f_pos;
 		}
-
-		if (unlikely(!(out->f_mode & FMODE_WRITE)))
-			return -EBADF;
 
 		if (unlikely(out->f_flags & O_APPEND))
 			return -EINVAL;
@@ -1143,14 +1139,17 @@ static long do_splice(struct file *in, loff_t __user *off_in,
 		if (unlikely(ret < 0))
 			return ret;
 
+		if (in->f_flags & O_NONBLOCK)
+			flags |= SPLICE_F_NONBLOCK;
+
 		file_start_write(out);
 		ret = do_splice_from(ipipe, out, &offset, len, flags);
 		file_end_write(out);
 
 		if (!off_out)
 			out->f_pos = offset;
-		else if (copy_to_user(off_out, &offset, sizeof(loff_t)))
-			ret = -EFAULT;
+		else
+			*off_out = offset;
 
 		return ret;
 	}
@@ -1161,11 +1160,13 @@ static long do_splice(struct file *in, loff_t __user *off_in,
 		if (off_in) {
 			if (!(in->f_mode & FMODE_PREAD))
 				return -EINVAL;
-			if (copy_from_user(&offset, off_in, sizeof(loff_t)))
-				return -EFAULT;
+			offset = *off_in;
 		} else {
 			offset = in->f_pos;
 		}
+
+		if (out->f_flags & O_NONBLOCK)
+			flags |= SPLICE_F_NONBLOCK;
 
 		pipe_lock(opipe);
 		ret = wait_for_space(opipe, flags);
@@ -1176,13 +1177,53 @@ static long do_splice(struct file *in, loff_t __user *off_in,
 			wakeup_pipe_readers(opipe);
 		if (!off_in)
 			in->f_pos = offset;
-		else if (copy_to_user(off_in, &offset, sizeof(loff_t)))
-			ret = -EFAULT;
+		else
+			*off_in = offset;
 
 		return ret;
 	}
 
 	return -EINVAL;
+}
+
+static long __do_splice(struct file *in, loff_t __user *off_in,
+			struct file *out, loff_t __user *off_out,
+			size_t len, unsigned int flags)
+{
+	struct pipe_inode_info *ipipe;
+	struct pipe_inode_info *opipe;
+	loff_t offset, *__off_in = NULL, *__off_out = NULL;
+	long ret;
+
+	ipipe = get_pipe_info(in);
+	opipe = get_pipe_info(out);
+
+	if (ipipe && off_in)
+		return -ESPIPE;
+	if (opipe && off_out)
+		return -ESPIPE;
+
+	if (off_out) {
+		if (copy_from_user(&offset, off_out, sizeof(loff_t)))
+			return -EFAULT;
+		__off_out = &offset;
+	}
+	if (off_in) {
+		if (copy_from_user(&offset, off_in, sizeof(loff_t)))
+			return -EFAULT;
+		__off_in = &offset;
+	}
+
+	ret = do_splice(in, __off_in, out, __off_out, len, flags);
+	if (ret < 0)
+		return ret;
+
+	if (__off_out && copy_to_user(off_out, __off_out, sizeof(loff_t)))
+		return -EFAULT;
+	if (__off_in && copy_to_user(off_in, __off_in, sizeof(loff_t)))
+		return -EFAULT;
+
+	return ret;
 }
 
 static int iter_to_pipe(struct iov_iter *from,
@@ -1395,15 +1436,11 @@ SYSCALL_DEFINE6(splice, int, fd_in, loff_t __user *, off_in,
 	error = -EBADF;
 	in = fdget(fd_in);
 	if (in.file) {
-		if (in.file->f_mode & FMODE_READ) {
-			out = fdget(fd_out);
-			if (out.file) {
-				if (out.file->f_mode & FMODE_WRITE)
-					error = do_splice(in.file, off_in,
-							  out.file, off_out,
-							  len, flags);
-				fdput(out);
-			}
+		out = fdget(fd_out);
+		if (out.file) {
+			error = __do_splice(in.file, off_in, out.file, off_out,
+					    len, flags);
+			fdput(out);
 		}
 		fdput(in);
 	}
@@ -1700,18 +1737,24 @@ static int link_pipe(struct pipe_inode_info *ipipe,
  * The 'flags' used are the SPLICE_F_* variants, currently the only
  * applicable one is SPLICE_F_NONBLOCK.
  */
-static long do_tee(struct file *in, struct file *out, size_t len,
-		   unsigned int flags)
+long do_tee(struct file *in, struct file *out, size_t len, unsigned int flags)
 {
 	struct pipe_inode_info *ipipe = get_pipe_info(in);
 	struct pipe_inode_info *opipe = get_pipe_info(out);
 	int ret = -EINVAL;
+
+	if (unlikely(!(in->f_mode & FMODE_READ) ||
+		     !(out->f_mode & FMODE_WRITE)))
+		return -EBADF;
 
 	/*
 	 * Duplicate the contents of ipipe to opipe without actually
 	 * copying the data.
 	 */
 	if (ipipe && opipe && ipipe != opipe) {
+		if ((in->f_flags | out->f_flags) & O_NONBLOCK)
+			flags |= SPLICE_F_NONBLOCK;
+
 		/*
 		 * Keep going, unless we encounter an error. The ipipe/opipe
 		 * ordering doesn't really matter.
@@ -1741,14 +1784,10 @@ SYSCALL_DEFINE4(tee, int, fdin, int, fdout, size_t, len, unsigned int, flags)
 	error = -EBADF;
 	in = fdget(fdin);
 	if (in.file) {
-		if (in.file->f_mode & FMODE_READ) {
-			struct fd out = fdget(fdout);
-			if (out.file) {
-				if (out.file->f_mode & FMODE_WRITE)
-					error = do_tee(in.file, out.file,
-							len, flags);
-				fdput(out);
-			}
+		struct fd out = fdget(fdout);
+		if (out.file) {
+			error = do_tee(in.file, out.file, len, flags);
+			fdput(out);
 		}
  		fdput(in);
  	}

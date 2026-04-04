@@ -2630,6 +2630,9 @@ static inline bool range_in_vma(struct vm_area_struct *vma,
 	return (vma && vma->vm_start <= start && end <= vma->vm_end);
 }
 
+extern int do_madvise(struct mm_struct *mm, unsigned long start,
+		      size_t len_in, int behavior);
+
 #ifdef CONFIG_MMU
 pgprot_t vm_get_page_prot(unsigned long vm_flags);
 void vma_set_page_prot(struct vm_area_struct *vma);
