@@ -586,9 +586,19 @@ asmlinkage long compat_sys_pselect6(int n, compat_ulong_t __user *inp,
 				    compat_ulong_t __user *exp,
 				    struct compat_timespec __user *tsp,
 				    void __user *sig);
+asmlinkage long compat_sys_pselect6_time64(int n, compat_ulong_t __user *inp,
+				    compat_ulong_t __user *outp,
+				    compat_ulong_t __user *exp,
+				    struct __kernel_timespec __user *tsp,
+				    void __user *sig);
 asmlinkage long compat_sys_ppoll(struct pollfd __user *ufds,
 				 unsigned int nfds,
 				 struct compat_timespec __user *tsp,
+				 const compat_sigset_t __user *sigmask,
+				 compat_size_t sigsetsize);
+asmlinkage long compat_sys_ppoll_time64(struct pollfd __user *ufds,
+				 unsigned int nfds,
+				 struct __kernel_timespec __user *tsp,
 				 const compat_sigset_t __user *sigmask,
 				 compat_size_t sigsetsize);
 asmlinkage long compat_sys_signalfd4(int ufd,
@@ -622,6 +632,10 @@ asmlinkage long compat_sys_recvfrom(int fd, void __user *buf, compat_size_t len,
 asmlinkage long compat_sys_recvmmsg(int fd, struct compat_mmsghdr __user *mmsg,
 				    unsigned vlen, unsigned int flags,
 				    struct compat_timespec __user *timeout);
+asmlinkage long compat_sys_recvmmsg_time64(int fd,
+				    struct compat_mmsghdr __user *mmsg,
+				    unsigned vlen, unsigned int flags,
+				    struct __kernel_timespec __user *timeout);
 asmlinkage long compat_sys_nanosleep(struct compat_timespec __user *rqtp,
 				     struct compat_timespec __user *rmtp);
 asmlinkage long compat_sys_getitimer(int which,
@@ -663,6 +677,11 @@ asmlinkage long compat_sys_clock_nanosleep(clockid_t which_clock, int flags,
 asmlinkage long compat_sys_rt_sigtimedwait(compat_sigset_t __user *uthese,
 		struct compat_siginfo __user *uinfo,
 		struct compat_timespec __user *uts, compat_size_t sigsetsize);
+asmlinkage long compat_sys_rt_sigtimedwait_time64(
+		compat_sigset_t __user *uthese,
+		struct compat_siginfo __user *uinfo,
+		struct __kernel_timespec __user *uts,
+		compat_size_t sigsetsize);
 asmlinkage long compat_sys_rt_sigsuspend(compat_sigset_t __user *unewset,
 					 compat_size_t sigsetsize);
 asmlinkage long compat_sys_rt_sigprocmask(int how, compat_sigset_t __user *set,

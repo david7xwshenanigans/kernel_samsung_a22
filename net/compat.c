@@ -697,6 +697,34 @@ COMPAT_SYSCALL_DEFINE5(recvmmsg, int, fd, struct compat_mmsghdr __user *, mmsg,
 	return datagrams;
 }
 
+COMPAT_SYSCALL_DEFINE5(recvmmsg_time64, int, fd,
+		       struct compat_mmsghdr __user *, mmsg,
+		       unsigned int, vlen, unsigned int, flags,
+		       struct __kernel_timespec __user *, timeout)
+{
+	int datagrams;
+	struct timespec64 ts64;
+	struct timespec ktspec;
+
+	if (timeout == NULL)
+		return __sys_recvmmsg(fd, (struct mmsghdr __user *)mmsg, vlen,
+				      flags | MSG_CMSG_COMPAT, NULL);
+
+	if (compat_get_timespec64(&ts64, timeout))
+		return -EFAULT;
+
+	ktspec = timespec64_to_timespec(ts64);
+	datagrams = __sys_recvmmsg(fd, (struct mmsghdr __user *)mmsg, vlen,
+				   flags | MSG_CMSG_COMPAT, &ktspec);
+	if (datagrams > 0) {
+		ts64 = timespec_to_timespec64(ktspec);
+		if (put_timespec64(&ts64, timeout))
+			datagrams = -EFAULT;
+	}
+
+	return datagrams;
+}
+
 COMPAT_SYSCALL_DEFINE2(socketcall, int, call, u32 __user *, args)
 {
 	u32 a[AUDITSC_ARGS];

@@ -1356,6 +1356,52 @@ static long do_compat_pselect(int n, compat_ulong_t __user *inp,
 	return ret;
 }
 
+static long do_compat_pselect_time64(int n, compat_ulong_t __user *inp,
+	compat_ulong_t __user *outp, compat_ulong_t __user *exp,
+	struct __kernel_timespec __user *tsp,
+	compat_sigset_t __user *sigmask, compat_size_t sigsetsize)
+{
+	compat_sigset_t ss32;
+	sigset_t ksigmask, sigsaved;
+	struct timespec64 ts, end_time, *to = NULL;
+	int ret;
+
+	if (tsp) {
+		if (get_timespec64(&ts, tsp))
+			return -EFAULT;
+
+		to = &end_time;
+		if (poll_select_set_timeout(to, ts.tv_sec, ts.tv_nsec))
+			return -EINVAL;
+	}
+
+	if (sigmask) {
+		if (sigsetsize != sizeof(compat_sigset_t))
+			return -EINVAL;
+		if (copy_from_user(&ss32, sigmask, sizeof(ss32)))
+			return -EFAULT;
+		sigset_from_compat(&ksigmask, &ss32);
+
+		sigdelsetmask(&ksigmask, sigmask(SIGKILL)|sigmask(SIGSTOP));
+		sigprocmask(SIG_SETMASK, &ksigmask, &sigsaved);
+	}
+
+	ret = compat_core_sys_select(n, inp, outp, exp, to);
+	ret = poll_select_copy_remaining(&end_time, tsp, 0, ret);
+
+	if (ret == -ERESTARTNOHAND) {
+		if (sigmask) {
+			memcpy(&current->saved_sigmask, &sigsaved,
+					sizeof(sigsaved));
+			set_restore_sigmask();
+		}
+	} else if (sigmask) {
+		sigprocmask(SIG_SETMASK, &sigsaved, NULL);
+	}
+
+	return ret;
+}
+
 COMPAT_SYSCALL_DEFINE6(pselect6, int, n, compat_ulong_t __user *, inp,
 	compat_ulong_t __user *, outp, compat_ulong_t __user *, exp,
 	struct compat_timespec __user *, tsp, void __user *, sig)
@@ -1373,6 +1419,26 @@ COMPAT_SYSCALL_DEFINE6(pselect6, int, n, compat_ulong_t __user *, inp,
 	}
 	return do_compat_pselect(n, inp, outp, exp, tsp, compat_ptr(up),
 				 sigsetsize);
+}
+
+COMPAT_SYSCALL_DEFINE6(pselect6_time64, int, n, compat_ulong_t __user *, inp,
+	compat_ulong_t __user *, outp, compat_ulong_t __user *, exp,
+	struct __kernel_timespec __user *, tsp, void __user *, sig)
+{
+	compat_size_t sigsetsize = 0;
+	compat_uptr_t up = 0;
+
+	if (sig) {
+		if (!access_ok(VERIFY_READ, sig,
+				sizeof(compat_uptr_t) + sizeof(compat_size_t)) ||
+		    __get_user(up, (compat_uptr_t __user *)sig) ||
+		    __get_user(sigsetsize,
+			(compat_size_t __user *)(sig + sizeof(up))))
+			return -EFAULT;
+	}
+
+	return do_compat_pselect_time64(n, inp, outp, exp, tsp, compat_ptr(up),
+					sigsetsize);
 }
 
 COMPAT_SYSCALL_DEFINE5(ppoll, struct pollfd __user *, ufds,
@@ -1424,6 +1490,53 @@ COMPAT_SYSCALL_DEFINE5(ppoll, struct pollfd __user *, ufds,
 		sigprocmask(SIG_SETMASK, &sigsaved, NULL);
 
 	ret = compat_poll_select_copy_remaining(&end_time, tsp, 0, ret);
+
+	return ret;
+}
+
+COMPAT_SYSCALL_DEFINE5(ppoll_time64, struct pollfd __user *, ufds,
+	unsigned int, nfds, struct __kernel_timespec __user *, tsp,
+	const compat_sigset_t __user *, sigmask, compat_size_t, sigsetsize)
+{
+	compat_sigset_t ss32;
+	sigset_t ksigmask, sigsaved;
+	struct timespec64 ts, end_time, *to = NULL;
+	int ret;
+
+	if (tsp) {
+		if (get_timespec64(&ts, tsp))
+			return -EFAULT;
+
+		to = &end_time;
+		if (poll_select_set_timeout(to, ts.tv_sec, ts.tv_nsec))
+			return -EINVAL;
+	}
+
+	if (sigmask) {
+		if (sigsetsize != sizeof(compat_sigset_t))
+			return -EINVAL;
+		if (copy_from_user(&ss32, sigmask, sizeof(ss32)))
+			return -EFAULT;
+		sigset_from_compat(&ksigmask, &ss32);
+
+		sigdelsetmask(&ksigmask, sigmask(SIGKILL)|sigmask(SIGSTOP));
+		sigprocmask(SIG_SETMASK, &ksigmask, &sigsaved);
+	}
+
+	ret = do_sys_poll(ufds, nfds, to);
+
+	if (ret == -EINTR) {
+		if (sigmask) {
+			memcpy(&current->saved_sigmask, &sigsaved,
+				sizeof(sigsaved));
+			set_restore_sigmask();
+		}
+		ret = -ERESTARTNOHAND;
+	} else if (sigmask) {
+		sigprocmask(SIG_SETMASK, &sigsaved, NULL);
+	}
+
+	ret = poll_select_copy_remaining(&end_time, tsp, 0, ret);
 
 	return ret;
 }

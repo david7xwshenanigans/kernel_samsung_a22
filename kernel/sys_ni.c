@@ -59,6 +59,7 @@ cond_syscall(compat_sys_recvmsg);
 cond_syscall(compat_sys_recv);
 cond_syscall(compat_sys_recvfrom);
 cond_syscall(compat_sys_recvmmsg);
+cond_syscall(compat_sys_recvmmsg_time64);
 cond_syscall(sys_socketcall);
 cond_syscall(sys_futex);
 cond_syscall(compat_sys_futex);
