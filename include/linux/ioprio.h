@@ -2,6 +2,7 @@
 #ifndef IOPRIO_H
 #define IOPRIO_H
 
+#include <linux/errno.h>
 #include <linux/sched.h>
 #include <linux/iocontext.h>
 
@@ -42,6 +43,11 @@ enum {
 };
 
 /*
+ * Default IO priority.
+ */
+#define IOPRIO_DEFAULT	IOPRIO_PRIO_VALUE(IOPRIO_CLASS_NONE, 0)
+
+/*
  * Fallback BE priority
  */
 #define IOPRIO_NORM	(4)
@@ -69,11 +75,29 @@ static inline int task_nice_ioclass(struct task_struct *task)
 		return IOPRIO_CLASS_BE;
 }
 
+static inline int get_current_ioprio(void)
+{
+	struct io_context *ioc = current->io_context;
+
+	if (ioc)
+		return ioc->ioprio;
+	return IOPRIO_DEFAULT;
+}
+
 /*
  * For inheritance, return the highest of the two given priorities
  */
 extern int ioprio_best(unsigned short aprio, unsigned short bprio);
 
 extern int set_task_ioprio(struct task_struct *task, int ioprio);
+
+#ifdef CONFIG_BLOCK
+extern int ioprio_check_cap(int ioprio);
+#else
+static inline int ioprio_check_cap(int ioprio)
+{
+	return -ENOTBLK;
+}
+#endif
 
 #endif

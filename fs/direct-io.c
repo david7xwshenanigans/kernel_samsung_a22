@@ -240,6 +240,27 @@ void dio_warn_stale_pagecache(struct file *filp)
 			current->comm);
 	}
 }
+int iocb_bio_iopoll(struct kiocb *kiocb, bool spin)
+{
+	struct inode *inode = file_inode(kiocb->ki_filp);
+	struct block_device *bdev;
+	blk_qc_t cookie = READ_ONCE(kiocb->ki_cookie);
+
+	(void)spin;
+
+	if (!blk_qc_t_valid(cookie))
+		return 0;
+
+	if (S_ISBLK(inode->i_mode))
+		bdev = I_BDEV(inode);
+	else
+		bdev = inode->i_sb->s_bdev;
+	if (!bdev)
+		return 0;
+
+	return blk_mq_poll(bdev_get_queue(bdev), cookie);
+}
+EXPORT_SYMBOL_GPL(iocb_bio_iopoll);
 
 /**
  * dio_complete() - called when all DIO BIO I/O has been completed
@@ -481,10 +502,12 @@ static inline void dio_bio_submit(struct dio *dio, struct dio_submit *sdio)
 	dio->bio_disk = bio->bi_disk;
 
 	if (sdio->submit_io) {
-		sdio->submit_io(bio, dio->inode, sdio->logical_offset_in_bio);
-		dio->bio_cookie = BLK_QC_T_NONE;
+		dio->bio_cookie = sdio->submit_io(bio, dio->inode,
+						  sdio->logical_offset_in_bio);
 	} else
 		dio->bio_cookie = submit_bio(bio);
+	if (dio->iocb->ki_flags & IOCB_HIPRI)
+		WRITE_ONCE(dio->iocb->ki_cookie, dio->bio_cookie);
 
 	sdio->bio = NULL;
 	sdio->boundary = 0;

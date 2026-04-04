@@ -61,36 +61,45 @@ int set_task_ioprio(struct task_struct *task, int ioprio)
 }
 EXPORT_SYMBOL_GPL(set_task_ioprio);
 
-SYSCALL_DEFINE3(ioprio_set, int, which, int, who, int, ioprio)
+int ioprio_check_cap(int ioprio)
 {
 	int class = IOPRIO_PRIO_CLASS(ioprio);
 	int data = IOPRIO_PRIO_DATA(ioprio);
+
+	switch (class) {
+	case IOPRIO_CLASS_RT:
+		if (!capable(CAP_SYS_ADMIN) && !capable(CAP_SYS_NICE))
+			return -EPERM;
+		/* fall through */
+	case IOPRIO_CLASS_BE:
+		if (data >= IOPRIO_BE_NR || data < 0)
+			return -EINVAL;
+		break;
+	case IOPRIO_CLASS_IDLE:
+		break;
+	case IOPRIO_CLASS_NONE:
+		if (data)
+			return -EINVAL;
+		break;
+	default:
+		return -EINVAL;
+	}
+
+	return 0;
+}
+EXPORT_SYMBOL_GPL(ioprio_check_cap);
+
+SYSCALL_DEFINE3(ioprio_set, int, which, int, who, int, ioprio)
+{
 	struct task_struct *p, *g;
 	struct user_struct *user;
 	struct pid *pgrp;
 	kuid_t uid;
 	int ret;
 
-	switch (class) {
-		case IOPRIO_CLASS_RT:
-			if (!capable(CAP_SYS_ADMIN))
-				return -EPERM;
-			/* fall through */
-			/* rt has prio field too */
-		case IOPRIO_CLASS_BE:
-			if (data >= IOPRIO_BE_NR || data < 0)
-				return -EINVAL;
-
-			break;
-		case IOPRIO_CLASS_IDLE:
-			break;
-		case IOPRIO_CLASS_NONE:
-			if (data)
-				return -EINVAL;
-			break;
-		default:
-			return -EINVAL;
-	}
+	ret = ioprio_check_cap(ioprio);
+	if (ret)
+		return ret;
 
 	ret = -ESRCH;
 	rcu_read_lock();

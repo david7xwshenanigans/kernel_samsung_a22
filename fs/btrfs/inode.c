@@ -8799,8 +8799,9 @@ out_err:
 	return 0;
 }
 
-static void btrfs_submit_direct(struct bio *dio_bio, struct inode *inode,
-				loff_t file_offset)
+static unsigned int btrfs_submit_direct(struct bio *dio_bio,
+					struct inode *inode,
+					loff_t file_offset)
 {
 	struct btrfs_dio_private *dip = NULL;
 	struct bio *bio = NULL;
@@ -8852,7 +8853,7 @@ static void btrfs_submit_direct(struct bio *dio_bio, struct inode *inode,
 
 	ret = btrfs_submit_direct_hook(dip);
 	if (!ret)
-		return;
+		return BLK_QC_T_NONE;
 
 	if (io_bio->end_io)
 		io_bio->end_io(io_bio, ret);
@@ -8896,6 +8897,7 @@ free_ordered:
 	if (bio)
 		bio_put(bio);
 	kfree(dip);
+	return BLK_QC_T_NONE;
 }
 
 static ssize_t check_direct_IO(struct btrfs_fs_info *fs_info,

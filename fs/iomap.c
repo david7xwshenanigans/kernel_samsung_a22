@@ -945,6 +945,8 @@ iomap_dio_actor(struct inode *inode, loff_t pos, loff_t length,
 
 		dio->submit.last_queue = bdev_get_queue(iomap->bdev);
 		dio->submit.cookie = submit_bio(bio);
+		if (iocb->ki_flags & IOCB_HIPRI)
+			WRITE_ONCE(iocb->ki_cookie, dio->submit.cookie);
 	} while (nr_pages);
 
 	/*

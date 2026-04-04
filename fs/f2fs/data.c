@@ -3659,7 +3659,7 @@ static void f2fs_dio_end_io(struct bio *bio)
 	bio_endio(bio);
 }
 
-static void f2fs_dio_submit_bio(struct bio *bio, struct inode *inode,
+static unsigned int f2fs_dio_submit_bio(struct bio *bio, struct inode *inode,
 							loff_t file_offset)
 {
 	struct f2fs_private_dio *dio;
@@ -3681,11 +3681,11 @@ static void f2fs_dio_submit_bio(struct bio *bio, struct inode *inode,
 	inc_page_count(F2FS_I_SB(inode),
 			write ? F2FS_DIO_WRITE : F2FS_DIO_READ);
 
-	submit_bio(bio);
-	return;
+	return submit_bio(bio);
 out:
 	bio->bi_status = BLK_STS_IOERR;
 	bio_endio(bio);
+	return BLK_QC_T_NONE;
 }
 
 static ssize_t f2fs_direct_IO(struct kiocb *iocb, struct iov_iter *iter)
