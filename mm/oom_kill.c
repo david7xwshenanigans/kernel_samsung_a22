@@ -42,6 +42,7 @@
 #include <linux/kthread.h>
 #include <linux/init.h>
 #include <linux/mmu_notifier.h>
+#include <linux/syscalls.h>
 
 #ifdef CONFIG_MTK_ION
 #include "mtk/ion_drv.h"
