@@ -27,6 +27,7 @@
  */
 
 #include <linux/mm.h>
+#include <linux/err.h>
 #include <linux/export.h>
 #include <linux/slab.h>
 #include <linux/init.h>
@@ -39,6 +40,9 @@
 #include <linux/proc_ns.h>
 #include <linux/proc_fs.h>
 #include <linux/anon_inodes.h>
+#include <linux/fdtable.h>
+#include <linux/file.h>
+#include <linux/ptrace.h>
 #include <linux/sched/signal.h>
 #include <linux/sched/task.h>
 #include <linux/idr.h>
@@ -510,6 +514,94 @@ SYSCALL_DEFINE2(pidfd_open, pid_t, pid, unsigned int, flags)
 	fd = ret ?: pidfd_create(p);
 	put_pid(p);
 	return fd;
+}
+
+static struct pid *pidfd_to_pid(const struct file *file)
+{
+	if (file->f_op == &pidfd_fops)
+		return file->private_data;
+
+	return tgid_pidfd_to_pid(file);
+}
+
+static struct file *__pidfd_fget(struct task_struct *task, int fd)
+{
+	struct files_struct *files;
+	struct file *file;
+
+	if (!ptrace_may_access(task, PTRACE_MODE_ATTACH_REALCREDS))
+		return ERR_PTR(-EPERM);
+
+	files = get_files_struct(task);
+	if (!files)
+		return ERR_PTR(-EBADF);
+
+	spin_lock(&files->file_lock);
+	file = fcheck_files(files, fd);
+	if (file)
+		get_file(file);
+	else
+		file = ERR_PTR(-EBADF);
+	spin_unlock(&files->file_lock);
+	put_files_struct(files);
+
+	return file;
+}
+
+static int pidfd_getfd(struct pid *pid, int fd)
+{
+	struct task_struct *task;
+	struct file *file;
+	int ret;
+
+	task = get_pid_task(pid, PIDTYPE_PID);
+	if (!task)
+		return -ESRCH;
+
+	file = __pidfd_fget(task, fd);
+	put_task_struct(task);
+	if (IS_ERR(file))
+		return PTR_ERR(file);
+
+	ret = get_unused_fd_flags(O_CLOEXEC);
+	if (ret >= 0)
+		fd_install(ret, file);
+	else
+		fput(file);
+
+	return ret;
+}
+
+/**
+ * sys_pidfd_getfd() - Get a file descriptor from another process
+ * @pidfd:  file descriptor of the process
+ * @fd:     file descriptor number to get
+ * @flags:  future flags
+ *
+ * Return: On success, a cloexec file descriptor is returned.
+ *         On error, a negative errno number will be returned.
+ */
+SYSCALL_DEFINE3(pidfd_getfd, int, pidfd, int, fd, unsigned int, flags)
+{
+	struct pid *pid;
+	struct fd f;
+	int ret;
+
+	if (flags)
+		return -EINVAL;
+
+	f = fdget(pidfd);
+	if (!f.file)
+		return -EBADF;
+
+	pid = pidfd_to_pid(f.file);
+	if (IS_ERR(pid))
+		ret = PTR_ERR(pid);
+	else
+		ret = pidfd_getfd(pid, fd);
+
+	fdput(f);
+	return ret;
 }
 
 /*
