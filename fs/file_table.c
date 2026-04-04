@@ -191,6 +191,7 @@ static void __fput(struct file *file)
 	struct dentry *dentry = file->f_path.dentry;
 	struct vfsmount *mnt = file->f_path.mnt;
 	struct inode *inode = file->f_inode;
+	fmode_t mode = file->f_mode;
 
 	might_sleep();
 
@@ -217,9 +218,9 @@ static void __fput(struct file *file)
 	}
 	fops_put(file->f_op);
 	put_pid(file->f_owner.pid);
-	if ((file->f_mode & (FMODE_READ | FMODE_WRITE)) == FMODE_READ)
+	if ((mode & (FMODE_READ | FMODE_WRITE)) == FMODE_READ)
 		i_readcount_dec(inode);
-	if (file->f_mode & FMODE_WRITER) {
+	if (mode & FMODE_WRITER) {
 		put_write_access(inode);
 		__mnt_drop_write(mnt);
 	}
@@ -228,6 +229,8 @@ static void __fput(struct file *file)
 	file->f_inode = NULL;
 	file_free(file);
 	dput(dentry);
+	if (unlikely(mode & FMODE_NEED_UNMOUNT))
+		dissolve_on_fput(mnt);
 	mntput(mnt);
 }
 

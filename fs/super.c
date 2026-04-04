@@ -468,6 +468,89 @@ void generic_shutdown_super(struct super_block *sb)
 
 EXPORT_SYMBOL(generic_shutdown_super);
 
+bool mount_capable(struct fs_context *fc)
+{
+	if (!(fc->fs_type->fs_flags & FS_USERNS_MOUNT))
+		return capable(CAP_SYS_ADMIN);
+	return ns_capable(fc->user_ns, CAP_SYS_ADMIN);
+}
+
+struct super_block *sget_fc(struct fs_context *fc,
+			    int (*test)(struct super_block *,
+					struct fs_context *),
+			    int (*set)(struct super_block *,
+				       struct fs_context *))
+{
+	struct user_namespace *user_ns = fc->global ? &init_user_ns : fc->user_ns;
+	struct super_block *s = NULL;
+	struct super_block *old;
+	int err;
+
+	if (user_ns != &init_user_ns &&
+	    !(fc->fs_type->fs_flags & FS_USERNS_MOUNT)) {
+		errorfc(fc, "VFS: Mounting from non-initial user namespace is not allowed");
+		return ERR_PTR(-EPERM);
+	}
+
+retry:
+	spin_lock(&sb_lock);
+	if (test) {
+		hlist_for_each_entry(old, &fc->fs_type->fs_supers, s_instances) {
+			if (!test(old, fc))
+				continue;
+			if (user_ns != old->s_user_ns) {
+				spin_unlock(&sb_lock);
+				if (s) {
+					up_write(&s->s_umount);
+					destroy_super(s);
+				}
+				return ERR_PTR(-EBUSY);
+			}
+			if (!grab_super(old))
+				goto retry;
+			if (s) {
+				up_write(&s->s_umount);
+				destroy_super(s);
+				s = NULL;
+			}
+			return old;
+		}
+	}
+	if (!s) {
+		spin_unlock(&sb_lock);
+		s = alloc_super(fc->fs_type, fc->sb_flags, user_ns);
+		if (!s)
+			return ERR_PTR(-ENOMEM);
+		goto retry;
+	}
+
+	s->s_fs_info = fc->s_fs_info;
+	err = set(s, fc);
+	if (err) {
+		s->s_fs_info = NULL;
+		spin_unlock(&sb_lock);
+		up_write(&s->s_umount);
+		destroy_super(s);
+		return ERR_PTR(err);
+	}
+
+	fc->s_fs_info = NULL;
+	s->s_type = fc->fs_type;
+	s->s_iflags |= fc->s_iflags;
+	strlcpy(s->s_id, s->s_type->name, sizeof(s->s_id));
+	list_add_tail(&s->s_list, &super_blocks);
+	hlist_add_head(&s->s_instances, &s->s_type->fs_supers);
+	spin_unlock(&sb_lock);
+	get_filesystem(s->s_type);
+	err = register_shrinker(&s->s_shrink);
+	if (err) {
+		deactivate_locked_super(s);
+		return ERR_PTR(err);
+	}
+	return s;
+}
+EXPORT_SYMBOL(sget_fc);
+
 /**
  *	sget_userns -	find or create a superblock
  *	@type:	filesystem type superblock should belong to
@@ -921,6 +1004,78 @@ int do_remount_sb(struct super_block *sb, int flags, void *data, int force)
 	return do_remount_sb2(NULL, sb, flags, data, force);
 }
 
+int reconfigure_super(struct fs_context *fc)
+{
+	struct super_block *sb = fc->root->d_sb;
+	int retval;
+	bool remount_ro = false;
+	bool remount_rw = false;
+
+	if (fc->sb_flags_mask & ~MS_RMT_MASK)
+		return -EINVAL;
+	if (sb->s_writers.frozen != SB_UNFROZEN)
+		return -EBUSY;
+
+#ifdef CONFIG_BLOCK
+	if ((fc->sb_flags_mask & SB_RDONLY) &&
+	    !(fc->sb_flags & SB_RDONLY) &&
+	    bdev_read_only(sb->s_bdev))
+		return -EACCES;
+#endif
+
+	if (fc->sb_flags_mask & SB_RDONLY) {
+		remount_rw = !(fc->sb_flags & SB_RDONLY) && sb_rdonly(sb);
+		remount_ro = (fc->sb_flags & SB_RDONLY) && !sb_rdonly(sb);
+	}
+
+	if (remount_ro) {
+		if (!hlist_empty(&sb->s_pins)) {
+			up_write(&sb->s_umount);
+			group_pin_kill(&sb->s_pins);
+			down_write(&sb->s_umount);
+			if (!sb->s_root)
+				return 0;
+			if (sb->s_writers.frozen != SB_UNFROZEN)
+				return -EBUSY;
+			remount_ro = !sb_rdonly(sb);
+		}
+	}
+	shrink_dcache_sb(sb);
+
+	if (remount_ro) {
+		retval = sb_prepare_remount_readonly(sb);
+		if (retval)
+			return retval;
+	} else if (remount_rw) {
+		sb->s_readonly_remount = 1;
+		smp_wmb();
+	}
+
+	if (fc->ops->reconfigure) {
+		retval = fc->ops->reconfigure(fc);
+		if (retval)
+			goto cancel_readonly;
+	}
+
+#ifdef CONFIG_FIVE
+	sb->s_flags = (sb->s_flags & ~fc->sb_flags_mask) |
+		      (fc->sb_flags & fc->sb_flags_mask) | MS_I_VERSION;
+#else
+	sb->s_flags = (sb->s_flags & ~fc->sb_flags_mask) |
+		      (fc->sb_flags & fc->sb_flags_mask);
+#endif
+	smp_wmb();
+	sb->s_readonly_remount = 0;
+
+	if (remount_ro && sb->s_bdev)
+		invalidate_bdev(sb->s_bdev);
+	return 0;
+
+cancel_readonly:
+	sb->s_readonly_remount = 0;
+	return retval;
+}
+
 static void do_emergency_remount(struct work_struct *work)
 {
 	struct super_block *sb, *p = NULL;
@@ -1008,6 +1163,12 @@ int set_anon_super(struct super_block *s, void *data)
 }
 EXPORT_SYMBOL(set_anon_super);
 
+int set_anon_super_fc(struct super_block *s, struct fs_context *fc)
+{
+	return set_anon_super(s, NULL);
+}
+EXPORT_SYMBOL(set_anon_super_fc);
+
 void kill_anon_super(struct super_block *sb)
 {
 	dev_t dev = sb->s_dev;
@@ -1081,6 +1242,16 @@ static int set_bdev_super(struct super_block *s, void *data)
 static int test_bdev_super(struct super_block *s, void *data)
 {
 	return (void *)s->s_bdev == data;
+}
+
+static int test_bdev_super_fc(struct super_block *s, struct fs_context *fc)
+{
+	return s->s_bdev == fc->sget_key;
+}
+
+static int set_bdev_super_fc(struct super_block *s, struct fs_context *fc)
+{
+	return set_bdev_super(s, fc->sget_key);
 }
 
 struct dentry *mount_bdev(struct file_system_type *fs_type,
@@ -1193,9 +1364,124 @@ struct dentry *mount_nodev(struct file_system_type *fs_type,
 }
 EXPORT_SYMBOL(mount_nodev);
 
+static int test_keyed_super(struct super_block *s, struct fs_context *fc)
+{
+	return s->s_fs_info == fc->s_fs_info;
+}
+
+static int test_single_super_fc(struct super_block *s, struct fs_context *fc)
+{
+	return 1;
+}
+
+int vfs_get_super(struct fs_context *fc,
+		  enum vfs_get_super_keying keying,
+		  int (*fill_super)(struct super_block *sb,
+				    struct fs_context *fc))
+{
+	int (*test)(struct super_block *, struct fs_context *);
+	struct super_block *sb;
+	int err;
+
+	switch (keying) {
+	case vfs_get_single_super:
+	case vfs_get_single_reconf_super:
+		test = test_single_super_fc;
+		break;
+	case vfs_get_keyed_super:
+		test = test_keyed_super;
+		break;
+	case vfs_get_independent_super:
+		test = NULL;
+		break;
+	default:
+		BUG();
+	}
+
+	sb = sget_fc(fc, test, set_anon_super_fc);
+	if (IS_ERR(sb))
+		return PTR_ERR(sb);
+
+	if (!sb->s_root) {
+		err = fill_super(sb, fc);
+		if (err) {
+			deactivate_locked_super(sb);
+			return err;
+		}
+		sb->s_flags |= SB_ACTIVE;
+	}
+
+	fc->root = dget(sb->s_root);
+	if (keying == vfs_get_single_reconf_super && sb->s_root) {
+		err = reconfigure_super(fc);
+		if (err < 0) {
+			dput(fc->root);
+			fc->root = NULL;
+			deactivate_locked_super(sb);
+			return err;
+		}
+	}
+
+	return 0;
+}
+EXPORT_SYMBOL(vfs_get_super);
+
+int get_tree_nodev(struct fs_context *fc,
+		   int (*fill_super)(struct super_block *sb,
+				     struct fs_context *fc))
+{
+	return vfs_get_super(fc, vfs_get_independent_super, fill_super);
+}
+EXPORT_SYMBOL(get_tree_nodev);
+
+int get_tree_single(struct fs_context *fc,
+		    int (*fill_super)(struct super_block *sb,
+				      struct fs_context *fc))
+{
+	return vfs_get_super(fc, vfs_get_single_super, fill_super);
+}
+EXPORT_SYMBOL(get_tree_single);
+
+int get_tree_single_reconf(struct fs_context *fc,
+			   int (*fill_super)(struct super_block *sb,
+					     struct fs_context *fc))
+{
+	return vfs_get_super(fc, vfs_get_single_reconf_super, fill_super);
+}
+EXPORT_SYMBOL(get_tree_single_reconf);
+
+int get_tree_keyed(struct fs_context *fc,
+		   int (*fill_super)(struct super_block *sb,
+				     struct fs_context *fc),
+		   void *key)
+{
+	fc->s_fs_info = key;
+	return vfs_get_super(fc, vfs_get_keyed_super, fill_super);
+}
+EXPORT_SYMBOL(get_tree_keyed);
+
 static int compare_single(struct super_block *s, void *p)
 {
 	return 1;
+}
+
+int reconfigure_single(struct super_block *s, int flags, void *data)
+{
+	struct fs_context *fc;
+	int ret;
+
+	fc = fs_context_for_reconfigure(s->s_root, flags, MS_RMT_MASK);
+	if (IS_ERR(fc))
+		return PTR_ERR(fc);
+
+	ret = parse_monolithic_mount_data(fc, data);
+	if (ret < 0)
+		goto out;
+
+	ret = reconfigure_super(fc);
+out:
+	put_fs_context(fc);
+	return ret;
 }
 
 struct dentry *mount_single(struct file_system_type *fs_type,
@@ -1216,11 +1502,110 @@ struct dentry *mount_single(struct file_system_type *fs_type,
 		}
 		s->s_flags |= SB_ACTIVE;
 	} else {
-		do_remount_sb(s, flags, data, 0);
+		error = reconfigure_single(s, flags, data);
+		if (error) {
+			deactivate_locked_super(s);
+			return ERR_PTR(error);
+		}
 	}
 	return dget(s->s_root);
 }
 EXPORT_SYMBOL(mount_single);
+
+#ifdef CONFIG_BLOCK
+int get_tree_bdev(struct fs_context *fc,
+		  int (*fill_super)(struct super_block *sb,
+				    struct fs_context *fc))
+{
+	struct block_device *bdev;
+	struct super_block *s;
+	fmode_t mode = FMODE_READ | FMODE_EXCL;
+	int error = 0;
+
+	if (!(fc->sb_flags & SB_RDONLY))
+		mode |= FMODE_WRITE;
+	if (!fc->source)
+		return invalf(fc, "No source specified");
+
+	bdev = blkdev_get_by_path(fc->source, mode, fc->fs_type);
+	if (IS_ERR(bdev))
+		return PTR_ERR(bdev);
+
+	mutex_lock(&bdev->bd_fsfreeze_mutex);
+	if (bdev->bd_fsfreeze_count > 0) {
+		mutex_unlock(&bdev->bd_fsfreeze_mutex);
+		blkdev_put(bdev, mode);
+		return -EBUSY;
+	}
+
+	fc->sb_flags |= SB_NOSEC;
+	fc->sget_key = bdev;
+	s = sget_fc(fc, test_bdev_super_fc, set_bdev_super_fc);
+	mutex_unlock(&bdev->bd_fsfreeze_mutex);
+	if (IS_ERR(s)) {
+		blkdev_put(bdev, mode);
+		return PTR_ERR(s);
+	}
+
+	if (s->s_root) {
+		if ((fc->sb_flags ^ s->s_flags) & SB_RDONLY) {
+			deactivate_locked_super(s);
+			blkdev_put(bdev, mode);
+			return -EBUSY;
+		}
+
+		up_write(&s->s_umount);
+		blkdev_put(bdev, mode);
+		down_write(&s->s_umount);
+	} else {
+		s->s_mode = mode;
+		snprintf(s->s_id, sizeof(s->s_id), "%pg", bdev);
+		sb_set_blocksize(s, block_size(bdev));
+		error = fill_super(s, fc);
+		if (error) {
+			deactivate_locked_super(s);
+			return error;
+		}
+		s->s_flags |= SB_ACTIVE;
+		bdev->bd_super = s;
+	}
+
+	fc->root = dget(s->s_root);
+	return 0;
+}
+EXPORT_SYMBOL(get_tree_bdev);
+#endif
+
+int vfs_get_tree(struct fs_context *fc)
+{
+	struct super_block *sb;
+	int error;
+
+	if (fc->root)
+		return -EBUSY;
+
+	error = fc->ops->get_tree(fc);
+	if (error < 0)
+		return error;
+	if (!fc->root)
+		BUG();
+
+	sb = fc->root->d_sb;
+	WARN_ON(!sb->s_bdi);
+	smp_wmb();
+	sb->s_flags |= SB_BORN;
+
+	error = security_sb_kern_mount(sb, fc->sb_flags, NULL);
+	if (error) {
+		fc_drop_locked(fc);
+		return error;
+	}
+
+	WARN((sb->s_maxbytes < 0), "%s set sb->s_maxbytes to "
+		"negative value (%lld)\n", fc->fs_type->name, sb->s_maxbytes);
+	return 0;
+}
+EXPORT_SYMBOL(vfs_get_tree);
 
 struct dentry *
 mount_fs(struct file_system_type *type, int flags, const char *name, struct vfsmount *mnt, void *data)

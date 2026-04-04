@@ -23,7 +23,7 @@
 #endif
 
 #define IS_MNT_SLAVE(m) ((m)->mnt_master)
-#define IS_MNT_NEW(m)  (!(m)->mnt_ns)
+#define IS_MNT_NEW(m)  (!(m)->mnt_ns || is_anon_ns((m)->mnt_ns))
 
 #ifndef CONFIG_RUSTUH_KDP_NS
 #ifdef CONFIG_KDP_NS

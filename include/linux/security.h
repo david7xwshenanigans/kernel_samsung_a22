@@ -54,6 +54,8 @@ struct xattr;
 struct kernfs_node;
 struct xfrm_sec_ctx;
 struct mm_struct;
+struct fs_context;
+struct fs_parameter;
 #ifdef CONFIG_KDP_CRED
 #include <linux/kdp.h>
 #endif
@@ -68,7 +70,7 @@ struct mm_struct;
 /* If capable is being called by a setid function */
 #define CAP_OPT_INSETID BIT(2)
 
-/* LSM Agnostic defines for sb_set_mnt_opts */
+/* LSM Agnostic defines for fs_context::lsm_flags */
 #define SECURITY_LSM_NATIVE_LABELS	1
 
 struct ctl_table;
@@ -296,6 +298,9 @@ int security_bprm_set_creds(struct linux_binprm *bprm);
 int security_bprm_check(struct linux_binprm *bprm);
 void security_bprm_committing_creds(struct linux_binprm *bprm);
 void security_bprm_committed_creds(struct linux_binprm *bprm);
+int security_fs_context_dup(struct fs_context *fc, struct fs_context *src_fc);
+int security_fs_context_parse_param(struct fs_context *fc,
+				    struct fs_parameter *param);
 int security_sb_alloc(struct super_block *sb);
 void security_sb_free(struct super_block *sb);
 int security_sb_copy_data(char *orig, char *copy);
@@ -316,6 +321,7 @@ int security_sb_clone_mnt_opts(const struct super_block *oldsb,
 				unsigned long kern_flags,
 				unsigned long *set_kern_flags);
 int security_sb_parse_opts_str(char *options, struct security_mnt_opts *opts);
+int security_move_mount(const struct path *from_path, const struct path *to_path);
 int security_dentry_init_security(struct dentry *dentry, int mode,
 					const struct qstr *name, void **ctx,
 					u32 *ctxlen);
@@ -612,6 +618,18 @@ static inline void security_bprm_committed_creds(struct linux_binprm *bprm)
 {
 }
 
+static inline int security_fs_context_dup(struct fs_context *fc,
+					  struct fs_context *src_fc)
+{
+	return 0;
+}
+
+static inline int security_fs_context_parse_param(struct fs_context *fc,
+						  struct fs_parameter *param)
+{
+	return -ENOPARAM;
+}
+
 static inline int security_sb_alloc(struct super_block *sb)
 {
 	return 0;
@@ -681,6 +699,12 @@ static inline int security_sb_clone_mnt_opts(const struct super_block *oldsb,
 }
 
 static inline int security_sb_parse_opts_str(char *options, struct security_mnt_opts *opts)
+{
+	return 0;
+}
+
+static inline int security_move_mount(const struct path *from_path,
+				      const struct path *to_path)
 {
 	return 0;
 }

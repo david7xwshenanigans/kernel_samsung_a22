@@ -797,6 +797,17 @@ void security_bprm_committed_creds(struct linux_binprm *bprm)
 	call_void_hook(bprm_committed_creds, bprm);
 }
 
+int security_fs_context_dup(struct fs_context *fc, struct fs_context *src_fc)
+{
+	return 0;
+}
+
+int security_fs_context_parse_param(struct fs_context *fc,
+				    struct fs_parameter *param)
+{
+	return -ENOPARAM;
+}
+
 int security_sb_alloc(struct super_block *sb)
 {
 	return call_int_hook(sb_alloc_security, 0, sb);
@@ -847,6 +858,11 @@ int security_sb_umount(struct vfsmount *mnt, int flags)
 int security_sb_pivotroot(const struct path *old_path, const struct path *new_path)
 {
 	return call_int_hook(sb_pivotroot, 0, old_path, new_path);
+}
+
+int security_move_mount(const struct path *from_path, const struct path *to_path)
+{
+	return 0;
 }
 
 int security_sb_set_mnt_opts(struct super_block *sb,

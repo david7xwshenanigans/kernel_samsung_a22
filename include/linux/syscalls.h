@@ -66,6 +66,7 @@ struct compat_timeval;
 struct clone_args;
 struct robust_list_head;
 struct getcpu_cache;
+struct mount_attr;
 struct old_linux_dirent;
 struct open_how;
 struct perf_event_attr;
@@ -925,6 +926,23 @@ asmlinkage long sys_open_by_handle_at(int mountdirfd,
 				      struct file_handle __user *handle,
 				      int flags);
 asmlinkage long sys_setns(int fd, int nstype);
+asmlinkage long sys_open_tree(int dfd, const char __user *path,
+			      unsigned flags);
+asmlinkage long sys_move_mount(int from_dfd, const char __user *from_path,
+			       int to_dfd, const char __user *to_path,
+			       unsigned int flags);
+asmlinkage long sys_mount_setattr(int dfd, const char __user *path,
+				  unsigned int flags,
+				  struct mount_attr __user *uattr,
+				  size_t usize);
+asmlinkage long sys_fsopen(const char __user *fs_name, unsigned int flags);
+asmlinkage long sys_fsconfig(int fs_fd, unsigned int cmd,
+			     const char __user *key,
+			     const void __user *value, int aux);
+asmlinkage long sys_fsmount(int fs_fd, unsigned int flags,
+			    unsigned int attr_flags);
+asmlinkage long sys_fspick(int dfd, const char __user *path,
+			   unsigned int flags);
 asmlinkage long sys_pidfd_open(pid_t pid, unsigned int flags);
 asmlinkage long sys_pidfd_getfd(int pidfd, int fd, unsigned int flags);
 asmlinkage long sys_clone3(struct clone_args __user *uargs, size_t size);

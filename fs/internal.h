@@ -17,6 +17,7 @@ struct linux_binprm;
 struct path;
 struct mount;
 struct shrink_control;
+struct fs_context;
 
 /*
  * block_dev.c
@@ -56,10 +57,17 @@ extern void __init chrdev_init(void);
 void dlog_hook(struct dentry *, struct inode *, struct path *);
 void dlog_hook_rmdir(struct dentry *, struct path *);
 #endif
+extern const struct fs_context_operations legacy_fs_context_ops;
+extern int parse_monolithic_mount_data(struct fs_context *, void *);
+extern void fc_drop_locked(struct fs_context *);
+extern void vfs_clean_context(struct fs_context *fc);
+extern int finish_clean_context(struct fs_context *fc);
 
 /*
  * namei.c
  */
+extern int filename_lookup(int dfd, struct filename *name, unsigned flags,
+			   struct path *path, struct path *root);
 extern int user_path_mountpoint_at(int, const char __user *, unsigned int, struct path *);
 extern int vfs_path_lookup(struct dentry *, struct vfsmount *,
 			   const char *, unsigned int, struct path *);
@@ -72,6 +80,7 @@ extern char *copy_mount_string(const void __user *);
 
 extern struct vfsmount *lookup_mnt(const struct path *);
 extern int finish_automount(struct vfsmount *, struct path *);
+extern struct vfsmount *vfs_create_mount(struct fs_context *fc);
 
 extern int sb_prepare_remount_readonly(struct super_block *);
 
@@ -83,6 +92,11 @@ extern int mnt_want_write_file_path(struct file *);
 extern void __mnt_drop_write(struct vfsmount *);
 extern void __mnt_drop_write_file(struct file *);
 extern void mnt_drop_write_file_path(struct file *);
+extern void dissolve_on_fput(struct vfsmount *);
+extern int path_mount(const char *dev_name, struct path *path,
+		      const char *type_page, unsigned long flags,
+		      void *data_page);
+extern int path_umount(struct path *path, int flags);
 
 /*
  * fs_struct.c
@@ -100,10 +114,12 @@ extern struct file *get_empty_filp(void);
 extern int do_remount_sb(struct super_block *, int, void *, int);
 extern int do_remount_sb2(struct vfsmount *, struct super_block *, int,
 								void *, int);
+extern int reconfigure_super(struct fs_context *);
 extern bool trylock_super(struct super_block *sb);
 extern struct dentry *mount_fs(struct file_system_type *,
 			       int, const char *, struct vfsmount *, void *);
 extern struct super_block *user_get_super(dev_t);
+extern bool mount_capable(struct fs_context *fc);
 
 /*
  * open.c

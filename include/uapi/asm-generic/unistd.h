@@ -740,6 +740,18 @@ __SYSCALL(__NR_rseq, sys_rseq)
 __SYSCALL(__NR_kexec_file_load, sys_kexec_file_load)
 #define __NR_pidfd_send_signal 424
 __SYSCALL(__NR_pidfd_send_signal, sys_pidfd_send_signal)
+#define __NR_open_tree 428
+__SYSCALL(__NR_open_tree, sys_open_tree)
+#define __NR_move_mount 429
+__SYSCALL(__NR_move_mount, sys_move_mount)
+#define __NR_fsopen 430
+__SYSCALL(__NR_fsopen, sys_fsopen)
+#define __NR_fsconfig 431
+__SYSCALL(__NR_fsconfig, sys_fsconfig)
+#define __NR_fsmount 432
+__SYSCALL(__NR_fsmount, sys_fsmount)
+#define __NR_fspick 433
+__SYSCALL(__NR_fspick, sys_fspick)
 #define __NR_pidfd_open 434
 __SYSCALL(__NR_pidfd_open, sys_pidfd_open)
 #define __NR_clone3 435
@@ -756,6 +768,8 @@ __SYSCALL(__NR_faccessat2, sys_faccessat2)
 __SC_COMP(__NR_process_madvise, sys_process_madvise, compat_sys_process_madvise)
 #define __NR_epoll_pwait2 441
 __SC_COMP(__NR_epoll_pwait2, sys_epoll_pwait2, compat_sys_epoll_pwait2)
+#define __NR_mount_setattr 442
+__SYSCALL(__NR_mount_setattr, sys_mount_setattr)
 #define __NR_quotactl_fd 443
 __SYSCALL(__NR_quotactl_fd, sys_quotactl_fd)
 #define __NR_memfd_secret 447

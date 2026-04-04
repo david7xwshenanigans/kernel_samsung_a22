@@ -262,7 +262,14 @@ cond_syscall(sys_execveat);
 /* membarrier */
 cond_syscall(sys_membarrier);
 cond_syscall(sys_rseq);
+cond_syscall(sys_open_tree);
+cond_syscall(sys_move_mount);
+cond_syscall(sys_fsopen);
+cond_syscall(sys_fsconfig);
+cond_syscall(sys_fsmount);
+cond_syscall(sys_fspick);
 cond_syscall(sys_clone3);
+cond_syscall(sys_mount_setattr);
 cond_syscall(sys_process_mrelease);
 
 /* memory protection keys */
