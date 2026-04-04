@@ -530,7 +530,7 @@ struct nameidata {
 	struct path	root;
 	struct inode	*inode; /* path.dentry.d_inode */
 	unsigned int	flags;
-	unsigned	seq, m_seq;
+	unsigned	seq, m_seq, r_seq;
 	int		last_type;
 	unsigned	depth;
 	int		total_link_count;
@@ -925,9 +925,12 @@ static int complete_walk(struct nameidata *nd)
 	return status;
 }
 
-static void set_root(struct nameidata *nd)
+static int set_root(struct nameidata *nd)
 {
 	struct fs_struct *fs = current->fs;
+
+	if (WARN_ON(nd->flags & LOOKUP_IS_SCOPED))
+		return -ENOTRECOVERABLE;
 
 	if (nd->flags & LOOKUP_RCU) {
 		unsigned seq;
@@ -940,6 +943,8 @@ static void set_root(struct nameidata *nd)
 	} else {
 		get_fs_root(fs, &nd->root);
 	}
+
+	return 0;
 }
 
 static void path_put_conditional(struct path *path, struct nameidata *nd)
@@ -963,6 +968,18 @@ static inline void path_to_nameidata(const struct path *path,
 
 static int nd_jump_root(struct nameidata *nd)
 {
+	if (unlikely(nd->flags & LOOKUP_BENEATH))
+		return -EXDEV;
+	if (unlikely(nd->flags & LOOKUP_NO_XDEV) &&
+	    nd->path.mnt && nd->path.mnt != nd->root.mnt)
+		return -EXDEV;
+	if (!nd->root.mnt) {
+		int error = set_root(nd);
+
+		if (unlikely(error))
+			return error;
+	}
+
 	if (nd->flags & LOOKUP_RCU) {
 		struct dentry *d;
 		nd->path = nd->root;
@@ -985,14 +1002,30 @@ static int nd_jump_root(struct nameidata *nd)
  * Helper to directly jump to a known parsed path from ->get_link,
  * caller must have taken a reference to path beforehand.
  */
-void nd_jump_link(struct path *path)
+int nd_jump_link(struct path *path)
 {
 	struct nameidata *nd = current->nameidata;
-	path_put(&nd->path);
 
+	if (unlikely(nd->flags & LOOKUP_NO_MAGICLINKS))
+		goto out_eagain;
+	if (unlikely(nd->flags & LOOKUP_NO_XDEV) &&
+	    nd->path.mnt != path->mnt)
+		goto out_exdev;
+	if (unlikely(nd->flags & LOOKUP_IS_SCOPED))
+		goto out_exdev;
+
+	path_put(&nd->path);
 	nd->path = *path;
 	nd->inode = nd->path.dentry->d_inode;
 	nd->flags |= LOOKUP_JUMPED;
+	return 0;
+
+out_exdev:
+	path_put(path);
+	return -EXDEV;
+out_eagain:
+	path_put(path);
+	return -ELOOP;
 }
 
 static inline void put_link(struct nameidata *nd)
@@ -1178,6 +1211,9 @@ const char *get_link(struct nameidata *nd)
 		touch_atime(&last->link);
 	}
 
+	if (unlikely(nd->flags & LOOKUP_NO_SYMLINKS))
+		return ERR_PTR(-ELOOP);
+
 	error = security_inode_follow_link(dentry, inode,
 					   nd->flags & LOOKUP_RCU);
 	if (unlikely(error))
@@ -1203,10 +1239,16 @@ const char *get_link(struct nameidata *nd)
 			return res;
 	}
 	if (*res == '/') {
-		if (!nd->root.mnt)
-			set_root(nd);
-		if (unlikely(nd_jump_root(nd)))
-			return ERR_PTR(-ECHILD);
+		int err;
+
+		if (!nd->root.mnt) {
+			error = set_root(nd);
+			if (unlikely(error))
+				return ERR_PTR(error);
+		}
+		err = nd_jump_root(nd);
+		if (unlikely(err))
+			return ERR_PTR(err);
 		while (unlikely(*++res == '/'))
 			;
 	}
@@ -1366,6 +1408,10 @@ static int follow_managed(struct path *path, struct nameidata *nd)
 
 		/* Transit to a mounted filesystem. */
 		if (managed & DCACHE_MOUNTED) {
+			if (unlikely(nd->flags & LOOKUP_NO_XDEV)) {
+				ret = -EXDEV;
+				break;
+			}
 			struct vfsmount *mounted = lookup_mnt(path);
 			if (mounted) {
 				dput(path->dentry);
@@ -1435,6 +1481,9 @@ static inline int managed_dentry_rcu(const struct path *path)
 static bool __follow_mount_rcu(struct nameidata *nd, struct path *path,
 			       struct inode **inode, unsigned *seqp)
 {
+	if (unlikely(nd->flags & LOOKUP_NO_XDEV))
+		return false;
+
 	for (;;) {
 		struct mount *mounted;
 		/*
@@ -1506,6 +1555,8 @@ static int follow_dotdot_rcu(struct nameidata *nd)
 			unsigned seq = read_seqcount_begin(&mountpoint->d_seq);
 			if (unlikely(read_seqretry(&mount_lock, nd->m_seq)))
 				return -ECHILD;
+			if (unlikely(nd->flags & LOOKUP_NO_XDEV))
+				return -ECHILD;
 #if defined(CONFIG_KDP_NS) || defined(CONFIG_RUSTUH_KDP_NS)
 			if (mparent->mnt == nd->path.mnt)
 #else
@@ -1528,6 +1579,8 @@ static int follow_dotdot_rcu(struct nameidata *nd)
 		mounted = __lookup_mnt(nd->path.mnt, nd->path.dentry);
 		if (unlikely(read_seqretry(&mount_lock, nd->m_seq)))
 			return -ECHILD;
+		if (unlikely(nd->flags & LOOKUP_NO_XDEV))
+			return -ECHILD;
 		if (!mounted)
 			break;
 #if defined(CONFIG_KDP_NS) || defined(CONFIG_RUSTUH_KDP_NS)
@@ -1540,6 +1593,9 @@ static int follow_dotdot_rcu(struct nameidata *nd)
 		inode = nd->path.dentry->d_inode;
 		nd->seq = read_seqcount_begin(&nd->path.dentry->d_seq);
 	}
+	if (path_equal(&nd->path, &nd->root) &&
+	    unlikely(nd->flags & LOOKUP_BENEATH))
+		return -ECHILD;
 	nd->inode = inode;
 	return 0;
 }
@@ -1633,10 +1689,17 @@ static int follow_dotdot(struct nameidata *nd)
 				return ret;
 			break;
 		}
+		if (unlikely(nd->flags & LOOKUP_NO_XDEV))
+			return -EXDEV;
 		if (!follow_up(&nd->path))
 			break;
 	}
-	follow_mount(&nd->path);
+	if (nd->path.dentry == nd->root.dentry &&
+	    nd->path.mnt == nd->root.mnt &&
+	    unlikely(nd->flags & LOOKUP_BENEATH))
+		return -EXDEV;
+	if (!(nd->flags & LOOKUP_NO_XDEV))
+		follow_mount(&nd->path);
 	nd->inode = nd->path.dentry->d_inode;
 	return 0;
 }
@@ -1847,12 +1910,26 @@ static inline int may_lookup(struct nameidata *nd)
 static inline int handle_dots(struct nameidata *nd, int type)
 {
 	if (type == LAST_DOTDOT) {
-		if (!nd->root.mnt)
-			set_root(nd);
-		if (nd->flags & LOOKUP_RCU) {
-			return follow_dotdot_rcu(nd);
-		} else
-			return follow_dotdot(nd);
+		int err;
+
+		if (!nd->root.mnt) {
+			err = set_root(nd);
+			if (err)
+				return err;
+		}
+		if (nd->flags & LOOKUP_RCU)
+			err = follow_dotdot_rcu(nd);
+		else
+			err = follow_dotdot(nd);
+		if (err)
+			return err;
+		if (unlikely(nd->flags & LOOKUP_IS_SCOPED)) {
+			smp_rmb();
+			if (unlikely(read_seqretry(&mount_lock, nd->m_seq)))
+				return -EAGAIN;
+			if (unlikely(read_seqretry(&rename_lock, nd->r_seq)))
+				return -EAGAIN;
+		}
 	}
 	return 0;
 }
@@ -1949,6 +2026,8 @@ static int walk_component(struct nameidata *nd, int flags)
 	if (unlikely(err <= 0)) {
 		if (err < 0)
 			return err;
+		if (unlikely(nd->flags & LOOKUP_CACHED))
+			return -EAGAIN;
 		path.dentry = lookup_slow(&nd->last, nd->path.dentry,
 					  nd->flags);
 		if (IS_ERR(path.dentry))
@@ -2312,12 +2391,16 @@ static const char *path_init(struct nameidata *nd, unsigned flags)
 {
 	const char *s = nd->name->name;
 
+	if ((flags & (LOOKUP_RCU | LOOKUP_CACHED)) == LOOKUP_CACHED)
+		return ERR_PTR(-EAGAIN);
+
 	if (!*s)
 		flags &= ~LOOKUP_RCU;
 
 	nd->last_type = LAST_ROOT; /* if there are only slashes... */
 	nd->flags = flags | LOOKUP_JUMPED | LOOKUP_PARENT;
 	nd->depth = 0;
+	nd->r_seq = read_seqbegin(&rename_lock);
 	if (flags & LOOKUP_ROOT) {
 		struct dentry *root = nd->root.dentry;
 		struct inode *inode = root->d_inode;
@@ -2341,15 +2424,20 @@ static const char *path_init(struct nameidata *nd, unsigned flags)
 	nd->path.dentry = NULL;
 
 	nd->m_seq = read_seqbegin(&mount_lock);
-	if (*s == '/') {
+	if (*s == '/' && !(flags & LOOKUP_IN_ROOT)) {
+		int err;
+
 		if (flags & LOOKUP_RCU)
 			rcu_read_lock();
-		set_root(nd);
-		if (likely(!nd_jump_root(nd)))
+		err = set_root(nd);
+		if (!err)
+			err = nd_jump_root(nd);
+		if (likely(!err))
 			return s;
 		nd->root.mnt = NULL;
-		rcu_read_unlock();
-		return ERR_PTR(-ECHILD);
+		if (flags & LOOKUP_RCU)
+			rcu_read_unlock();
+		return ERR_PTR(err);
 	} else if (nd->dfd == AT_FDCWD) {
 		if (flags & LOOKUP_RCU) {
 			struct fs_struct *fs = current->fs;
@@ -2367,7 +2455,6 @@ static const char *path_init(struct nameidata *nd, unsigned flags)
 			get_fs_pwd(current->fs, &nd->path);
 			nd->inode = nd->path.dentry->d_inode;
 		}
-		return s;
 	} else {
 		/* Caller must check execute permissions on the starting path component */
 		struct fd f = fdget_raw(nd->dfd);
@@ -2395,8 +2482,17 @@ static const char *path_init(struct nameidata *nd, unsigned flags)
 			nd->inode = nd->path.dentry->d_inode;
 		}
 		fdput(f);
-		return s;
 	}
+
+	if (flags & LOOKUP_IS_SCOPED) {
+		nd->root = nd->path;
+		if (flags & LOOKUP_RCU)
+			nd->root_seq = nd->seq;
+		else
+			path_get(&nd->root);
+	}
+
+	return s;
 }
 
 static const char *trailing_symlink(struct nameidata *nd)
@@ -3766,7 +3862,10 @@ struct file *do_filp_open(int dfd, struct filename *pathname,
 
 	set_nameidata(&nd, dfd, pathname);
 	filp = path_openat(&nd, op, flags | LOOKUP_RCU);
-	if (unlikely(filp == ERR_PTR(-ECHILD)))
+	if (unlikely(filp == ERR_PTR(-ECHILD)) &&
+	    unlikely(flags & LOOKUP_CACHED))
+		filp = ERR_PTR(-EAGAIN);
+	else if (unlikely(filp == ERR_PTR(-ECHILD)))
 		filp = path_openat(&nd, op, flags);
 	if (unlikely(filp == ERR_PTR(-ESTALE)))
 		filp = path_openat(&nd, op, flags | LOOKUP_REVAL);
