@@ -725,6 +725,9 @@ asmlinkage ssize_t compat_sys_process_vm_writev(compat_pid_t pid,
 		const struct compat_iovec __user *lvec,
 		compat_ulong_t liovcnt, const struct compat_iovec __user *rvec,
 		compat_ulong_t riovcnt, compat_ulong_t flags);
+asmlinkage long compat_sys_process_madvise(int pidfd,
+		const struct compat_iovec __user *vec,
+		compat_size_t vlen, int behavior, unsigned int flags);
 
 asmlinkage long compat_sys_sendfile(int out_fd, int in_fd,
 				    compat_off_t __user *offset, compat_size_t count);

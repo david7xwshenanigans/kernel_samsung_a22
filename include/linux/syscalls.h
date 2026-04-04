@@ -923,6 +923,9 @@ asmlinkage long sys_open_by_handle_at(int mountdirfd,
 asmlinkage long sys_setns(int fd, int nstype);
 asmlinkage long sys_pidfd_open(pid_t pid, unsigned int flags);
 asmlinkage long sys_pidfd_getfd(int pidfd, int fd, unsigned int flags);
+asmlinkage long sys_process_madvise(int pidfd, const struct iovec __user *vec,
+				    size_t vlen, int behavior,
+				    unsigned int flags);
 asmlinkage long sys_process_mrelease(int pidfd, unsigned int flags);
 asmlinkage long sys_process_vm_readv(pid_t pid,
 				     const struct iovec __user *lvec,
