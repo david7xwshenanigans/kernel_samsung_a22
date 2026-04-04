@@ -166,6 +166,17 @@ static inline void set_notify_resume(struct task_struct *task)
 #endif
 }
 
+static inline void set_notify_signal(struct task_struct *task)
+{
+#ifdef TIF_NOTIFY_SIGNAL
+	if (!test_and_set_tsk_thread_flag(task, TIF_NOTIFY_SIGNAL) &&
+	    !wake_up_state(task, TASK_INTERRUPTIBLE))
+		kick_process(task);
+#else
+	set_notify_resume(task);
+#endif
+}
+
 /**
  * tracehook_notify_resume - report when about to return to user mode
  * @regs:		user-mode registers of @current task
@@ -192,6 +203,18 @@ static inline void tracehook_notify_resume(struct pt_regs *regs)
 
 	mem_cgroup_handle_over_high();
 	rseq_handle_notify_resume(NULL, regs);
+}
+
+static inline void tracehook_notify_signal(void)
+{
+#ifdef TIF_NOTIFY_SIGNAL
+	clear_thread_flag(TIF_NOTIFY_SIGNAL);
+	smp_mb__after_atomic();
+	if (unlikely(current->task_works))
+		task_work_run();
+#else
+	tracehook_notify_resume(NULL);
+#endif
 }
 
 #endif	/* <linux/tracehook.h> */

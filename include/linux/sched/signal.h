@@ -305,6 +305,14 @@ extern void sigqueue_free(struct sigqueue *);
 extern int send_sigqueue(struct sigqueue *,  struct task_struct *, int group);
 extern int do_sigaction(int, struct k_sigaction *, struct k_sigaction *);
 
+static inline void clear_notify_signal(void)
+{
+#ifdef TIF_NOTIFY_SIGNAL
+	clear_thread_flag(TIF_NOTIFY_SIGNAL);
+	smp_mb__after_atomic();
+#endif
+}
+
 static inline int restart_syscall(void)
 {
 	set_tsk_thread_flag(current, TIF_SIGPENDING);
@@ -313,6 +321,10 @@ static inline int restart_syscall(void)
 
 static inline int signal_pending(struct task_struct *p)
 {
+#ifdef TIF_NOTIFY_SIGNAL
+	if (unlikely(test_tsk_thread_flag(p, TIF_NOTIFY_SIGNAL)))
+		return 1;
+#endif
 	return unlikely(test_tsk_thread_flag(p,TIF_SIGPENDING));
 }
 
