@@ -1140,8 +1140,7 @@ void pagefault_out_of_memory(void)
 		pr_warn("Huh VM_FAULT_OOM leaked out to the #PF handler. Retrying PF\n");
 }
 
-SYSCALL_DEFINE2(process_mrelease, int, process_pidfd,
-		unsigned int, release_flags)
+SYSCALL_DEFINE2(process_mrelease, int, pidfd, unsigned int, flags)
 {
 #ifdef CONFIG_MMU
 	struct mm_struct *mm = NULL;
@@ -1153,10 +1152,10 @@ SYSCALL_DEFINE2(process_mrelease, int, process_pidfd,
 	struct pid *pid;
 	long ret = 0;
 
-	if (release_flags)
+	if (flags)
 		return -EINVAL;
 
-	pid = pidfd_get_pid(process_pidfd, &f_flags);
+	pid = pidfd_get_pid(pidfd, &f_flags);
 	if (IS_ERR(pid))
 		return PTR_ERR(pid);
 
