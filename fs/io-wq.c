@@ -1144,7 +1144,8 @@ struct io_wq *io_wq_create(unsigned bounded, struct io_wq_data *data)
 		INIT_LIST_HEAD(&wqe->all_list);
 	}
 
-	wq->task = get_task_struct(data->task);
+	get_task_struct(data->task);
+	wq->task = data->task;
 	atomic_set(&wq->worker_refs, 1);
 	init_completion(&wq->worker_done);
 	return wq;
