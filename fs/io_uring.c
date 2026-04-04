@@ -112,6 +112,78 @@
 
 #define IO_TCTX_REFS_CACHE_NR	(1U << 10)
 
+static inline int __get_unused_fd_flags(unsigned flags, unsigned long nofile)
+{
+	return __alloc_fd(current->files, 0, nofile, flags);
+}
+
+static int __import_iovec(int type, const struct iovec __user *uvector,
+			  unsigned nr_segs, unsigned fast_segs,
+			  struct iovec **iov, struct iov_iter *iter,
+			  bool compat)
+{
+#ifdef CONFIG_COMPAT
+	if (compat)
+		return compat_import_iovec(type,
+				(const struct compat_iovec __user *)uvector,
+				nr_segs, fast_segs, iov, iter);
+#endif
+	return import_iovec(type, uvector, nr_segs, fast_segs, iov, iter);
+}
+
+#ifdef CONFIG_COMPAT
+static int __get_compat_msghdr(struct msghdr *kmsg,
+			       struct compat_msghdr __user *umsg,
+			       struct sockaddr __user **save_addr,
+			       compat_uptr_t *uiov, compat_size_t *len)
+{
+	struct compat_msghdr msg;
+	ssize_t err;
+
+	if (copy_from_user(&msg, umsg, sizeof(*umsg)))
+		return -EFAULT;
+
+	kmsg->msg_flags = msg.msg_flags;
+	kmsg->msg_namelen = msg.msg_namelen;
+
+	if (!msg.msg_name)
+		kmsg->msg_namelen = 0;
+
+	if (kmsg->msg_namelen < 0)
+		return -EINVAL;
+
+	if (kmsg->msg_namelen > sizeof(struct sockaddr_storage))
+		kmsg->msg_namelen = sizeof(struct sockaddr_storage);
+
+	kmsg->msg_control = compat_ptr(msg.msg_control);
+	kmsg->msg_controllen = msg.msg_controllen;
+
+	if (save_addr)
+		*save_addr = compat_ptr(msg.msg_name);
+
+	if (msg.msg_name && kmsg->msg_namelen) {
+		if (!save_addr) {
+			err = move_addr_to_kernel(compat_ptr(msg.msg_name),
+						  kmsg->msg_namelen,
+						  kmsg->msg_name);
+			if (err < 0)
+				return err;
+		}
+	} else {
+		kmsg->msg_name = NULL;
+		kmsg->msg_namelen = 0;
+	}
+
+	if (msg.msg_iovlen > UIO_MAXIOV)
+		return -EMSGSIZE;
+
+	kmsg->msg_iocb = NULL;
+	*uiov = msg.msg_iov;
+	*len = msg.msg_iovlen;
+	return 0;
+}
+#endif
+
 struct io_uring {
 	u32 head ____cacheline_aligned_in_smp;
 	u32 tail ____cacheline_aligned_in_smp;
