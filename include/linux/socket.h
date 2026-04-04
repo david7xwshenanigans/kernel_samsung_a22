@@ -352,6 +352,27 @@ extern int put_cmsg(struct msghdr*, int level, int type, int len, void *data);
 struct timespec;
 
 /* The __sys_...msg variants allow MSG_CMSG_COMPAT */
+extern int __sys_shutdown_sock(struct socket *sock, int how);
+extern long __sys_sendmsg_sock(struct socket *sock, struct msghdr *msg,
+			       unsigned int flags);
+extern long __sys_recvmsg_sock(struct socket *sock, struct msghdr *msg,
+			       struct user_msghdr __user *umsg,
+			       struct sockaddr __user *uaddr,
+			       unsigned int flags);
+extern int sendmsg_copy_msghdr(struct msghdr *msg,
+			       struct user_msghdr __user *umsg,
+			       unsigned int flags, struct iovec **iov);
+extern int __copy_msghdr_from_user(struct msghdr *kmsg,
+				   struct user_msghdr __user *umsg,
+				   struct sockaddr __user **save_addr,
+				   struct iovec __user **uiov,
+				   size_t *nsegs);
+extern int __sys_connect_file(struct file *file,
+			      struct sockaddr_storage *address,
+			      int addrlen, int file_flags);
+extern struct file *do_accept(struct file *file, unsigned file_flags,
+			      struct sockaddr __user *upeer_sockaddr,
+			      int __user *upeer_addrlen, int flags);
 extern long __sys_recvmsg(int fd, struct user_msghdr __user *msg, unsigned flags);
 extern long __sys_sendmsg(int fd, struct user_msghdr __user *msg, unsigned flags);
 extern int __sys_recvmmsg(int fd, struct mmsghdr __user *mmsg, unsigned int vlen,
