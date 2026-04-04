@@ -2606,7 +2606,6 @@ int filename_lookup(int dfd, struct filename *name, unsigned flags,
 	if (likely(!retval))
 		audit_inode(name, path->dentry, flags & LOOKUP_PARENT);
 	restore_nameidata();
-	putname(name);
 	return retval;
 }
 
@@ -2686,8 +2685,12 @@ struct dentry *kern_path_locked(const char *name, struct path *path)
 
 int kern_path(const char *name, unsigned int flags, struct path *path)
 {
-	return filename_lookup(AT_FDCWD, getname_kernel(name),
-			       flags, path, NULL);
+	struct filename *filename = getname_kernel(name);
+	int ret = filename_lookup(AT_FDCWD, filename, flags, path, NULL);
+
+	if (!IS_ERR(filename))
+		putname(filename);
+	return ret;
 }
 EXPORT_SYMBOL(kern_path);
 
@@ -2703,10 +2706,15 @@ int vfs_path_lookup(struct dentry *dentry, struct vfsmount *mnt,
 		    const char *name, unsigned int flags,
 		    struct path *path)
 {
+	struct filename *filename;
 	struct path root = {.mnt = mnt, .dentry = dentry};
+	int ret;
 	/* the first argument of filename_lookup() is ignored with root */
-	return filename_lookup(AT_FDCWD, getname_kernel(name),
-			       flags , path, &root);
+	filename = getname_kernel(name);
+	ret = filename_lookup(AT_FDCWD, filename, flags, path, &root);
+	if (!IS_ERR(filename))
+		putname(filename);
+	return ret;
 }
 EXPORT_SYMBOL(vfs_path_lookup);
 
@@ -2858,8 +2866,12 @@ int path_pts(struct path *path)
 int user_path_at_empty(int dfd, const char __user *name, unsigned flags,
 		 struct path *path, int *empty)
 {
-	return filename_lookup(dfd, getname_flags(name, flags, empty),
-			       flags, path, NULL);
+	struct filename *filename = getname_flags(name, flags, empty);
+	int ret = filename_lookup(dfd, filename, flags, path, NULL);
+
+	if (!IS_ERR(filename))
+		putname(filename);
+	return ret;
 }
 EXPORT_SYMBOL(user_path_at_empty);
 
@@ -3958,7 +3970,6 @@ static struct dentry *filename_create(int dfd, struct filename *name,
 		error = err2;
 		goto fail;
 	}
-	putname(name);
 	return dentry;
 fail:
 	dput(dentry);
@@ -3969,15 +3980,18 @@ unlock:
 		mnt_drop_write(path->mnt);
 out:
 	path_put(path);
-	putname(name);
 	return dentry;
 }
 
 struct dentry *kern_path_create(int dfd, const char *pathname,
 				struct path *path, unsigned int lookup_flags)
 {
-	return filename_create(dfd, getname_kernel(pathname),
-				path, lookup_flags);
+	struct filename *filename = getname_kernel(pathname);
+	struct dentry *res = filename_create(dfd, filename, path, lookup_flags);
+
+	if (!IS_ERR(filename))
+		putname(filename);
+	return res;
 }
 EXPORT_SYMBOL(kern_path_create);
 
@@ -3993,7 +4007,12 @@ EXPORT_SYMBOL(done_path_create);
 inline struct dentry *user_path_create(int dfd, const char __user *pathname,
 				struct path *path, unsigned int lookup_flags)
 {
-	return filename_create(dfd, getname(pathname), path, lookup_flags);
+	struct filename *filename = getname(pathname);
+	struct dentry *res = filename_create(dfd, filename, path, lookup_flags);
+
+	if (!IS_ERR(filename))
+		putname(filename);
+	return res;
 }
 EXPORT_SYMBOL(user_path_create);
 
@@ -4129,7 +4148,7 @@ int vfs_mkdir(struct inode *dir, struct dentry *dentry, umode_t mode)
 }
 EXPORT_SYMBOL(vfs_mkdir);
 
-SYSCALL_DEFINE3(mkdirat, int, dfd, const char __user *, pathname, umode_t, mode)
+int do_mkdirat(int dfd, struct filename *name, umode_t mode)
 {
 	struct dentry *dentry;
 	struct path path;
@@ -4137,9 +4156,10 @@ SYSCALL_DEFINE3(mkdirat, int, dfd, const char __user *, pathname, umode_t, mode)
 	unsigned int lookup_flags = LOOKUP_DIRECTORY;
 
 retry:
-	dentry = user_path_create(dfd, pathname, &path, lookup_flags);
+	dentry = filename_create(dfd, name, &path, lookup_flags);
+	error = PTR_ERR(dentry);
 	if (IS_ERR(dentry))
-		return PTR_ERR(dentry);
+		goto out_putname;
 
 	if (!IS_POSIXACL(path.dentry->d_inode))
 		mode &= ~current_umask();
@@ -4151,12 +4171,20 @@ retry:
 		lookup_flags |= LOOKUP_REVAL;
 		goto retry;
 	}
+out_putname:
+	if (!IS_ERR(name))
+		putname(name);
 	return error;
+}
+
+SYSCALL_DEFINE3(mkdirat, int, dfd, const char __user *, pathname, umode_t, mode)
+{
+	return do_mkdirat(dfd, getname(pathname), mode);
 }
 
 SYSCALL_DEFINE2(mkdir, const char __user *, pathname, umode_t, mode)
 {
-	return sys_mkdirat(AT_FDCWD, pathname, mode);
+	return do_mkdirat(AT_FDCWD, getname(pathname), mode);
 }
 
 int vfs_rmdir2(struct vfsmount *mnt, struct inode *dir, struct dentry *dentry)
@@ -4209,18 +4237,16 @@ int vfs_rmdir(struct inode *dir, struct dentry *dentry)
 }
 EXPORT_SYMBOL(vfs_rmdir);
 
-static long do_rmdir(int dfd, const char __user *pathname)
+int do_rmdir(int dfd, struct filename *name)
 {
 	int error = 0;
-	struct filename *name;
 	struct dentry *dentry;
 	struct path path;
 	struct qstr last;
 	int type;
 	unsigned int lookup_flags = 0;
 retry:
-	name = filename_parentat(dfd, getname(pathname), lookup_flags,
-				&path, &last, &type);
+	name = filename_parentat(dfd, name, lookup_flags, &path, &last, &type);
 	if (IS_ERR(name))
 		return PTR_ERR(name);
 
@@ -4264,17 +4290,17 @@ exit2:
 	mnt_drop_write(path.mnt);
 exit1:
 	path_put(&path);
-	putname(name);
 	if (retry_estale(error, lookup_flags)) {
 		lookup_flags |= LOOKUP_REVAL;
 		goto retry;
 	}
+	putname(name);
 	return error;
 }
 
 SYSCALL_DEFINE1(rmdir, const char __user *, pathname)
 {
-	return do_rmdir(AT_FDCWD, pathname);
+	return do_rmdir(AT_FDCWD, getname(pathname));
 }
 
 /**
@@ -4347,10 +4373,9 @@ EXPORT_SYMBOL(vfs_unlink);
  * writeout happening, and we don't want to prevent access to the directory
  * while waiting on the I/O.
  */
-static long do_unlinkat(int dfd, const char __user *pathname)
+int do_unlinkat(int dfd, struct filename *name)
 {
 	int error;
-	struct filename *name;
 	struct dentry *dentry;
 	struct path path;
 	struct qstr last;
@@ -4359,8 +4384,7 @@ static long do_unlinkat(int dfd, const char __user *pathname)
 	struct inode *delegated_inode = NULL;
 	unsigned int lookup_flags = 0;
 retry:
-	name = filename_parentat(dfd, getname(pathname), lookup_flags,
-				&path, &last, &type);
+	name = filename_parentat(dfd, name, lookup_flags, &path, &last, &type);
 	if (IS_ERR(name))
 		return PTR_ERR(name);
 
@@ -4406,12 +4430,12 @@ exit2:
 	mnt_drop_write(path.mnt);
 exit1:
 	path_put(&path);
-	putname(name);
 	if (retry_estale(error, lookup_flags)) {
 		lookup_flags |= LOOKUP_REVAL;
 		inode = NULL;
 		goto retry;
 	}
+	putname(name);
 	return error;
 
 slashes:
@@ -4430,14 +4454,14 @@ SYSCALL_DEFINE3(unlinkat, int, dfd, const char __user *, pathname, int, flag)
 		return -EINVAL;
 
 	if (flag & AT_REMOVEDIR)
-		return do_rmdir(dfd, pathname);
+		return do_rmdir(dfd, getname(pathname));
 
-	return do_unlinkat(dfd, pathname);
+	return do_unlinkat(dfd, getname(pathname));
 }
 
 SYSCALL_DEFINE1(unlink, const char __user *, pathname)
 {
-	return do_unlinkat(AT_FDCWD, pathname);
+	return do_unlinkat(AT_FDCWD, getname(pathname));
 }
 
 int vfs_symlink2(struct vfsmount *mnt, struct inode *dir, struct dentry *dentry, const char *oldname)
@@ -4467,23 +4491,22 @@ int vfs_symlink(struct inode *dir, struct dentry *dentry, const char *oldname)
 }
 EXPORT_SYMBOL(vfs_symlink);
 
-SYSCALL_DEFINE3(symlinkat, const char __user *, oldname,
-		int, newdfd, const char __user *, newname)
+int do_symlinkat(struct filename *from, int newdfd, struct filename *to)
 {
 	int error;
-	struct filename *from;
 	struct dentry *dentry;
 	struct path path;
 	unsigned int lookup_flags = 0;
 
-	from = getname(oldname);
-	if (IS_ERR(from))
-		return PTR_ERR(from);
+	if (IS_ERR(from)) {
+		error = PTR_ERR(from);
+		goto out_putnames;
+	}
 retry:
-	dentry = user_path_create(newdfd, newname, &path, lookup_flags);
+	dentry = filename_create(newdfd, to, &path, lookup_flags);
 	error = PTR_ERR(dentry);
 	if (IS_ERR(dentry))
-		goto out_putname;
+		goto out_putnames;
 
 	error = security_path_symlink(&path, dentry, from->name);
 	if (!error)
@@ -4493,14 +4516,23 @@ retry:
 		lookup_flags |= LOOKUP_REVAL;
 		goto retry;
 	}
-out_putname:
-	putname(from);
+out_putnames:
+	if (!IS_ERR(to))
+		putname(to);
+	if (!IS_ERR(from))
+		putname(from);
 	return error;
+}
+
+SYSCALL_DEFINE3(symlinkat, const char __user *, oldname,
+		int, newdfd, const char __user *, newname)
+{
+	return do_symlinkat(getname(oldname), newdfd, getname(newname));
 }
 
 SYSCALL_DEFINE2(symlink, const char __user *, oldname, const char __user *, newname)
 {
-	return sys_symlinkat(oldname, AT_FDCWD, newname);
+	return do_symlinkat(getname(oldname), AT_FDCWD, getname(newname));
 }
 
 /**
@@ -4598,8 +4630,8 @@ EXPORT_SYMBOL(vfs_link);
  * with linux 2.0, and to avoid hard-linking to directories
  * and other special files.  --ADM
  */
-SYSCALL_DEFINE5(linkat, int, olddfd, const char __user *, oldname,
-		int, newdfd, const char __user *, newname, int, flags)
+int do_linkat(int olddfd, struct filename *old, int newdfd,
+	      struct filename *new, int flags)
 {
 	struct dentry *new_dentry;
 	struct path old_path, new_path;
@@ -4607,27 +4639,31 @@ SYSCALL_DEFINE5(linkat, int, olddfd, const char __user *, oldname,
 	int how = 0;
 	int error;
 
-	if ((flags & ~(AT_SYMLINK_FOLLOW | AT_EMPTY_PATH)) != 0)
-		return -EINVAL;
+	if ((flags & ~(AT_SYMLINK_FOLLOW | AT_EMPTY_PATH)) != 0) {
+		error = -EINVAL;
+		goto out_putnames;
+	}
 	/*
 	 * To use null names we require CAP_DAC_READ_SEARCH
 	 * This ensures that not everyone will be able to create
 	 * handlink using the passed filedescriptor.
 	 */
 	if (flags & AT_EMPTY_PATH) {
-		if (!capable(CAP_DAC_READ_SEARCH))
-			return -ENOENT;
-		how = LOOKUP_EMPTY;
+		if (!capable(CAP_DAC_READ_SEARCH)) {
+			error = -ENOENT;
+			goto out_putnames;
+		}
+		how |= LOOKUP_EMPTY;
 	}
 
 	if (flags & AT_SYMLINK_FOLLOW)
 		how |= LOOKUP_FOLLOW;
 retry:
-	error = user_path_at(olddfd, oldname, how, &old_path);
+	error = filename_lookup(olddfd, old, how, &old_path, NULL);
 	if (error)
-		return error;
+		goto out_putnames;
 
-	new_dentry = user_path_create(newdfd, newname, &new_path,
+	new_dentry = filename_create(newdfd, new, &new_path,
 					(how & LOOKUP_REVAL));
 	error = PTR_ERR(new_dentry);
 	if (IS_ERR(new_dentry))
@@ -4659,13 +4695,29 @@ out_dput:
 	}
 out:
 	path_put(&old_path);
+out_putnames:
+	if (!IS_ERR(new))
+		putname(new);
+	if (!IS_ERR(old))
+		putname(old);
 
 	return error;
 }
 
+SYSCALL_DEFINE5(linkat, int, olddfd, const char __user *, oldname,
+		int, newdfd, const char __user *, newname, int, flags)
+{
+	return do_linkat(olddfd,
+			 getname_flags(oldname,
+				       (flags & AT_EMPTY_PATH) ? LOOKUP_EMPTY : 0,
+				       NULL),
+			 newdfd, getname(newname), flags);
+}
+
 SYSCALL_DEFINE2(link, const char __user *, oldname, const char __user *, newname)
 {
-	return sys_linkat(AT_FDCWD, oldname, AT_FDCWD, newname, 0);
+	return do_linkat(AT_FDCWD, getname(oldname), AT_FDCWD,
+			 getname(newname), 0);
 }
 
 /**
@@ -4861,8 +4913,8 @@ int vfs_rename(struct inode *old_dir, struct dentry *old_dentry,
 }
 EXPORT_SYMBOL(vfs_rename);
 
-SYSCALL_DEFINE5(renameat2, int, olddfd, const char __user *, oldname,
-		int, newdfd, const char __user *, newname, unsigned int, flags)
+int do_renameat2(int olddfd, struct filename *from, int newdfd,
+		 struct filename *to, unsigned int flags)
 {
 	struct dentry *old_dentry, *new_dentry;
 	struct dentry *trap;
@@ -4870,38 +4922,47 @@ SYSCALL_DEFINE5(renameat2, int, olddfd, const char __user *, oldname,
 	struct qstr old_last, new_last;
 	int old_type, new_type;
 	struct inode *delegated_inode = NULL;
-	struct filename *from;
-	struct filename *to;
 	unsigned int lookup_flags = 0, target_flags = LOOKUP_RENAME_TARGET;
 	bool should_retry = false;
-	int error;
+	int error = -EINVAL;
+
+	if (IS_ERR(from)) {
+		error = PTR_ERR(from);
+		goto out_put_to;
+	}
+	if (IS_ERR(to)) {
+		error = PTR_ERR(to);
+		goto out_put_from;
+	}
 
 	if (flags & ~(RENAME_NOREPLACE | RENAME_EXCHANGE | RENAME_WHITEOUT))
-		return -EINVAL;
+		goto out_putnames;
 
 	if ((flags & (RENAME_NOREPLACE | RENAME_WHITEOUT)) &&
 	    (flags & RENAME_EXCHANGE))
-		return -EINVAL;
+		goto out_putnames;
 
-	if ((flags & RENAME_WHITEOUT) && !capable(CAP_MKNOD))
-		return -EPERM;
+	if ((flags & RENAME_WHITEOUT) && !capable(CAP_MKNOD)) {
+		error = -EPERM;
+		goto out_putnames;
+	}
 
 	if (flags & RENAME_EXCHANGE)
 		target_flags = 0;
 
 retry:
-	from = filename_parentat(olddfd, getname(oldname), lookup_flags,
+	from = filename_parentat(olddfd, from, lookup_flags,
 				&old_path, &old_last, &old_type);
 	if (IS_ERR(from)) {
 		error = PTR_ERR(from);
-		goto exit;
+		goto out_put_to;
 	}
 
-	to = filename_parentat(newdfd, getname(newname), lookup_flags,
+	to = filename_parentat(newdfd, to, lookup_flags,
 				&new_path, &new_last, &new_type);
 	if (IS_ERR(to)) {
 		error = PTR_ERR(to);
-		goto exit1;
+		goto out_put_from_path;
 	}
 
 	error = -EXDEV;
@@ -4991,28 +5052,46 @@ exit2:
 	if (retry_estale(error, lookup_flags))
 		should_retry = true;
 	path_put(&new_path);
-	putname(to);
-exit1:
 	path_put(&old_path);
-	putname(from);
 	if (should_retry) {
 		should_retry = false;
 		lookup_flags |= LOOKUP_REVAL;
 		goto retry;
 	}
-exit:
+out_putnames:
+	putname(to);
+out_put_from:
+	putname(from);
 	return error;
+
+out_put_from_path:
+	path_put(&old_path);
+	goto out_put_from;
+
+out_put_to:
+	if (!IS_ERR(to))
+		putname(to);
+	return error;
+}
+
+SYSCALL_DEFINE5(renameat2, int, olddfd, const char __user *, oldname,
+		int, newdfd, const char __user *, newname, unsigned int, flags)
+{
+	return do_renameat2(olddfd, getname(oldname), newdfd, getname(newname),
+			    flags);
 }
 
 SYSCALL_DEFINE4(renameat, int, olddfd, const char __user *, oldname,
 		int, newdfd, const char __user *, newname)
 {
-	return sys_renameat2(olddfd, oldname, newdfd, newname, 0);
+	return do_renameat2(olddfd, getname(oldname), newdfd, getname(newname),
+			    0);
 }
 
 SYSCALL_DEFINE2(rename, const char __user *, oldname, const char __user *, newname)
 {
-	return sys_renameat2(AT_FDCWD, oldname, AT_FDCWD, newname, 0);
+	return do_renameat2(AT_FDCWD, getname(oldname), AT_FDCWD,
+			    getname(newname), 0);
 }
 
 int vfs_whiteout(struct inode *dir, struct dentry *dentry)

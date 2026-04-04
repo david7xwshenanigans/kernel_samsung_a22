@@ -68,6 +68,15 @@ extern int finish_clean_context(struct fs_context *fc);
  */
 extern int filename_lookup(int dfd, struct filename *name, unsigned flags,
 			   struct path *path, struct path *root);
+extern int do_mkdirat(int dfd, struct filename *name, umode_t mode);
+extern int do_rmdir(int dfd, struct filename *name);
+extern int do_unlinkat(int dfd, struct filename *name);
+extern int do_symlinkat(struct filename *from, int newdfd,
+			struct filename *to);
+extern int do_linkat(int olddfd, struct filename *old, int newdfd,
+		     struct filename *new, int flags);
+extern int do_renameat2(int olddfd, struct filename *from, int newdfd,
+			struct filename *to, unsigned int flags);
 extern int user_path_mountpoint_at(int, const char __user *, unsigned int, struct path *);
 extern int vfs_path_lookup(struct dentry *, struct vfsmount *,
 			   const char *, unsigned int, struct path *);
