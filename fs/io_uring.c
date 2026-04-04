@@ -4172,7 +4172,15 @@ static int io_openat_prep(struct io_kiocb *req, const struct io_uring_sqe *sqe)
 	u64 mode = READ_ONCE(sqe->len);
 	u64 flags = READ_ONCE(sqe->open_flags);
 
-	req->open.how = build_open_how(flags, mode);
+	req->open.how = (struct open_how) {
+		.flags = flags & VALID_OPEN_FLAGS,
+		.mode = mode & S_IALLUGO,
+	};
+	if (req->open.how.flags & O_PATH)
+		req->open.how.flags &= O_DIRECTORY | O_NOFOLLOW | O_PATH |
+					O_CLOEXEC;
+	if (!(req->open.how.flags & (O_CREAT | __O_TMPFILE)))
+		req->open.how.mode = 0;
 	return __io_openat_prep(req, sqe);
 }
 
@@ -5434,7 +5442,7 @@ static void io_init_poll_iocb(struct io_poll_iocb *poll, __poll_t events,
 	poll->head = NULL;
 	poll->done = false;
 	poll->canceled = false;
-#define IO_POLL_UNMASK	(EPOLLERR|EPOLLHUP|EPOLLNVAL|EPOLLRDHUP)
+#define IO_POLL_UNMASK	(EPOLLERR|EPOLLHUP|POLLNVAL|EPOLLRDHUP)
 	/* mask in events that we always want/need */
 	poll->events = events | IO_POLL_UNMASK;
 	INIT_LIST_HEAD(&poll->wait.entry);
@@ -8795,7 +8803,7 @@ static void io_buffer_unmap(struct io_ring_ctx *ctx, struct io_mapped_ubuf **slo
 
 	if (imu != ctx->dummy_ubuf) {
 		for (i = 0; i < imu->nr_bvecs; i++)
-			unpin_user_page(imu->bvec[i].bv_page);
+			put_page(imu->bvec[i].bv_page);
 		if (imu->acct_pages)
 			io_unaccount_mem(ctx, imu->acct_pages);
 		kvfree(imu);
@@ -8968,8 +8976,8 @@ static int io_sqe_buffer_register(struct io_ring_ctx *ctx, struct iovec *iov,
 
 	ret = 0;
 	mmap_read_lock(current->mm);
-	pret = pin_user_pages(ubuf, nr_pages, FOLL_WRITE | FOLL_LONGTERM,
-			      pages, vmas);
+	pret = get_user_pages_longterm(ubuf, nr_pages, FOLL_WRITE, pages,
+				       vmas);
 	if (pret == nr_pages) {
 		/* don't support file backed memory */
 		for (i = 0; i < nr_pages; i++) {
@@ -8993,13 +9001,13 @@ static int io_sqe_buffer_register(struct io_ring_ctx *ctx, struct iovec *iov,
 		 * release any pages we did get
 		 */
 		if (pret > 0)
-			unpin_user_pages(pages, pret);
+			release_pages(pages, pret, false);
 		goto done;
 	}
 
 	ret = io_buffer_account_pin(ctx, pages, pret, imu, last_hpage);
 	if (ret) {
-		unpin_user_pages(pages, pret);
+		release_pages(pages, pret, false);
 		goto done;
 	}
 
