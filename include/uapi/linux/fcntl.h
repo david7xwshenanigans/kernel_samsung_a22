@@ -90,10 +90,16 @@
 #define DN_ATTRIB	0x00000020	/* File changed attibutes */
 #define DN_MULTISHOT	0x80000000	/* Don't remove notifier */
 
+/*
+ * AT_EACCESS is meaningful only to faccessat, while AT_REMOVEDIR is
+ * meaningful only to unlinkat. The two functions use the same value.
+ */
 #define AT_FDCWD		-100    /* Special value used to indicate
                                            openat should use the current
                                            working directory. */
 #define AT_SYMLINK_NOFOLLOW	0x100   /* Do not follow symbolic links.  */
+#define AT_EACCESS		0x200	/* Test access permitted for
+                                           effective IDs, not real IDs.  */
 #define AT_REMOVEDIR		0x200   /* Remove directory instead of
                                            unlinking file.  */
 #define AT_SYMLINK_FOLLOW	0x400   /* Follow symbolic links.  */

@@ -831,6 +831,8 @@ __SYSCALL(__NR_pidfd_send_signal, sys_pidfd_send_signal)
 __SYSCALL(__NR_pidfd_open, sys_pidfd_open)
 #define __NR_pidfd_getfd 438
 __SYSCALL(__NR_pidfd_getfd, sys_pidfd_getfd)
+#define __NR_faccessat2 439
+__SYSCALL(__NR_faccessat2, sys_faccessat2)
 #define __NR_epoll_pwait2 441
 __SYSCALL(__NR_epoll_pwait2, compat_sys_epoll_pwait2)
 
