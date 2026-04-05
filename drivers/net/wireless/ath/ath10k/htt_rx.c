@@ -1390,6 +1390,16 @@ static void ath10k_htt_rx_h_csum_offload(struct sk_buff *msdu)
 	msdu->ip_summed = ath10k_htt_rx_get_csum_state(msdu);
 }
 
+static bool ath10k_htt_rx_h_frag_multicast_check(struct ath10k *ar,
+					       struct sk_buff *skb,
+					       u16 offset)
+{
+	struct ieee80211_hdr *hdr;
+
+	hdr = (struct ieee80211_hdr *)(skb->data + offset);
+	return !is_multicast_ether_addr(hdr->addr1);
+}
+
 static void ath10k_htt_rx_h_mpdu(struct ath10k *ar,
 				 struct sk_buff_head *amsdu,
 				 struct ieee80211_rx_status *status,
@@ -1410,6 +1420,8 @@ static void ath10k_htt_rx_h_mpdu(struct ath10k *ar,
 	bool is_decrypted;
 	bool is_mgmt;
 	u32 attention;
+
+	bool frag;
 
 	if (skb_queue_empty(amsdu))
 		return;
@@ -1493,12 +1505,26 @@ static void ath10k_htt_rx_h_mpdu(struct ath10k *ar,
 			status->flag |= RX_FLAG_IV_STRIPPED;
 	}
 
+	frag = ieee80211_has_morefrags(hdr->frame_control) ||
+	       (le16_to_cpu(hdr->seq_ctrl) & IEEE80211_SCTL_FRAG);
+
 	skb_queue_walk(amsdu, msdu) {
 		ath10k_htt_rx_h_csum_offload(msdu);
 
 		if (frag && !fill_crypt_header &&
 		    enctype == HTT_RX_MPDU_ENCRYPT_TKIP_WPA)
 			status->flag &= ~RX_FLAG_MMIC_STRIPPED;
+
+		if (frag) {
+			if (!ath10k_htt_rx_h_frag_multicast_check(ar, msdu, 0)) {
+				/* Discard the fragment with multicast DA */
+				temp = msdu->prev;
+				__skb_unlink(msdu, amsdu);
+				dev_kfree_skb_any(msdu);
+				msdu = temp;
+				continue;
+			}
+		}
 
 		ath10k_htt_rx_h_undecap(ar, msdu, status, first_hdr, enctype,
 					is_decrypted);
