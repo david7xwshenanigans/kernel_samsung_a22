@@ -1,9 +1,9 @@
 # SPDX-License-Identifier: GPL-2.0
 VERSION = 4
 PATCHLEVEL = 14
-SUBLEVEL = 367
-EXTRAVERSION = -gcuring
-NAME = Gigachad Uring
+SUBLEVEL = 368
+EXTRAVERSION = -capybara
+NAME = Resilient CIP Capybara
 
 # *DOCUMENTATION*
 # To see a list of typical targets execute "make help"
