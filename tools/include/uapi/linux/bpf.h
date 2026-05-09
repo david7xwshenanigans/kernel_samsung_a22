@@ -3822,6 +3822,15 @@ union bpf_attr {
  *	Return
  *		Current *ktime*.
  *
+ * long bpf_ima_inode_hash(struct inode *inode, void *dst, u32 size)
+ *	Description
+ *		Returns the stored IMA hash of the *inode* (if it's available).
+ *		If the hash is larger than *size*, then only *size*
+ *		bytes will be copied to *dst*.
+ *	Return
+ *		The **hash_algo** on success, **-EOPNOTSUPP** if IMA is
+ *		disabled, or **-EINVAL** if invalid arguments are passed.
+ *
  * long bpf_for_each_map_elem(struct bpf_map *map, void *callback_fn, void *callback_ctx, u64 flags)
  *	Description
  *		For each element in **map**, call **callback_fn** function with
@@ -4205,6 +4214,7 @@ union bpf_attr {
 	FN(get_current_task_btf),	\
 	FN(bprm_opts_set),		\
 	FN(ktime_get_coarse_ns),	\
+	FN(ima_inode_hash),		\
 	FN(for_each_map_elem),		\
 	FN(snprintf),			\
 	FN(timer_init),			\
