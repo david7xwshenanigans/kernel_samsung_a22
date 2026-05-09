@@ -3803,6 +3803,16 @@ union bpf_attr {
  *	Return
  *		**-EINVAL** if invalid *flags* are passed, zero otherwise.
  *
+ * u64 bpf_ktime_get_coarse_ns(void)
+ *	Description
+ *		Return a coarse-grained version of the time elapsed since
+ *		system boot, in nanoseconds. Does not include time the system
+ *		was suspended.
+ *
+ *		See: **clock_gettime**\ (**CLOCK_MONOTONIC_COARSE**)
+ *	Return
+ *		Current *ktime*.
+ *
  * long bpf_task_pt_regs(struct task_struct *task)
  *	Description
  *		Get the struct pt_regs associated with **task**.
@@ -3970,6 +3980,7 @@ union bpf_attr {
 	FN(task_storage_delete),	\
 	FN(get_current_task_btf),	\
 	FN(bprm_opts_set),		\
+	FN(ktime_get_coarse_ns),	\
 	FN(task_pt_regs),		\
 	/* */
 
