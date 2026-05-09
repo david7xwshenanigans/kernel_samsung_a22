@@ -4153,6 +4153,11 @@ enum bpf_lwt_encap_mode {
 	BPF_LWT_ENCAP_IP,
 };
 
+/* Flags for bpf_bprm_opts_set helper. */
+enum {
+	BPF_F_BPRM_SECUREEXEC = (1ULL << 0),
+};
+
 #define __bpf_md_ptr(type, name)	\
 union {					\
 	type name;			\

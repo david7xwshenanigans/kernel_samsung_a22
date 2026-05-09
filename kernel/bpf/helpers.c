@@ -15,6 +15,7 @@
 #include <linux/jiffies.h>
 #include <linux/pid_namespace.h>
 #include <linux/proc_ns.h>
+#include <linux/timekeeping.h>
 
 #include "../../lib/kstrtox.h"
 
@@ -170,7 +171,9 @@ const struct bpf_func_proto bpf_ktime_get_boot_ns_proto = {
 
 BPF_CALL_0(bpf_ktime_get_coarse_ns)
 {
-	return ktime_get_coarse_ns();
+	struct timespec64 ts = get_monotonic_coarse64();
+
+	return timespec64_to_ns(&ts);
 }
 
 const struct bpf_func_proto bpf_ktime_get_coarse_ns_proto = {

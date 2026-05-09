@@ -961,7 +961,7 @@ const struct bpf_func_proto bpf_task_pt_regs_proto = {
 	.func		= bpf_task_pt_regs,
 	.gpl_only	= true,
 	.arg1_type	= ARG_PTR_TO_BTF_ID,
-	.arg1_btf_id	= &btf_task_struct_ids[0],
+	.arg1_btf_id	= &bpf_get_current_btf_ids[0],
 	.ret_type	= RET_PTR_TO_BTF_ID,
 	.ret_btf_id	= &bpf_task_pt_regs_ids[0],
 };
