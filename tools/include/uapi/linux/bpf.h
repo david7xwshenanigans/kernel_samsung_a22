@@ -3793,6 +3793,16 @@ union bpf_attr {
  *	Return
  *		Pointer to the current task.
  *
+ * long bpf_bprm_opts_set(struct linux_binprm *bprm, u64 flags)
+ *	Description
+ *		Set or clear certain options on *bprm*:
+ *
+ *		**BPF_F_BPRM_SECUREEXEC** Set the secureexec bit
+ *		which sets the **AT_SECURE** auxv for glibc. The bit
+ *		is cleared if the flag is not specified.
+ *	Return
+ *		**-EINVAL** if invalid *flags* are passed, zero otherwise.
+ *
  * long bpf_task_pt_regs(struct task_struct *task)
  *	Description
  *		Get the struct pt_regs associated with **task**.
@@ -3959,6 +3969,7 @@ union bpf_attr {
 	FN(task_storage_get),		\
 	FN(task_storage_delete),	\
 	FN(get_current_task_btf),	\
+	FN(bprm_opts_set),		\
 	FN(task_pt_regs),		\
 	/* */
 
