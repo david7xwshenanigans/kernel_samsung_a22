@@ -94,6 +94,7 @@
 #include <linux/io_uring.h>
 #include <linux/thread_info.h>
 #include <linux/cpufreq_times.h>
+#include <linux/bpf.h>
 #include <linux/scs.h>
 #include <linux/task_integrity.h>
 
@@ -2065,6 +2066,9 @@ static __latent_entropy struct task_struct *copy_process(
 #ifdef CONFIG_BCACHE
 	p->sequential_io	= 0;
 	p->sequential_io_avg	= 0;
+#endif
+#ifdef CONFIG_BPF_SYSCALL
+	RCU_INIT_POINTER(p->bpf_storage, NULL);
 #endif
 #ifdef CONFIG_MTK_TASK_TURBO
 	init_turbo_attr(p, current);
