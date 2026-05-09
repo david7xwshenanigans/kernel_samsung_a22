@@ -3920,6 +3920,101 @@ union bpf_attr {
  *		Get the struct pt_regs associated with **task**.
  *	Return
  *		A pointer to struct pt_regs.
+ *
+ * long bpf_get_branch_snapshot(void *entries, u32 size, u64 flags)
+ *	Description
+ *		Get branch trace from hardware engines like Intel LBR. The
+ *		hardware engine is stopped shortly after the helper is
+ *		called. Therefore, the user need to filter branch entries
+ *		based on the actual use case. To capture branch trace
+ *		before the trigger point of the BPF program, the helper
+ *		should be called at the beginning of the BPF program.
+ *
+ *		The data is stored as struct perf_branch_entry into output
+ *		buffer *entries*. *size* is the size of *entries* in bytes.
+ *		*flags* is reserved for now and must be zero.
+ *
+ *	Return
+ *		On success, number of bytes written to *buf*. On error, a
+ *		negative value.
+ *
+ *		**-EINVAL** if *flags* is not zero.
+ *
+ *		**-ENOENT** if architecture does not support branch records.
+ *
+ * long bpf_trace_vprintk(const char *fmt, u32 fmt_size, const void *data, u32 data_len)
+ *	Description
+ *		Behaves like **bpf_trace_printk**\ () helper, but takes an array of u64
+ *		to format and can handle more format args as a result.
+ *
+ *		Arguments are to be used as in **bpf_seq_printf**\ () helper.
+ *	Return
+ *		The number of bytes written to the buffer, or a negative error
+ *		in case of failure.
+ *
+ * struct unix_sock *bpf_skc_to_unix_sock(void *sk)
+ * 	Description
+ *		Dynamically cast a *sk* pointer to a *unix_sock* pointer.
+ *	Return
+ *		*sk* if casting is valid, or **NULL** otherwise.
+ *
+ * long bpf_kallsyms_lookup_name(const char *name, int name_sz, int flags, u64 *res)
+ *	Description
+ *		Get the address of a kernel symbol, returned in *res*. *res* is
+ *		set to 0 if the symbol is not found.
+ *	Return
+ *		On success, zero. On error, a negative value.
+ *
+ *		**-EINVAL** if *flags* is not zero.
+ *
+ *		**-EINVAL** if string *name* is not the same size as *name_sz*.
+ *
+ *		**-ENOENT** if symbol is not found.
+ *
+ *		**-EPERM** if caller does not have permission to obtain kernel address.
+ *
+ * long bpf_find_vma(struct task_struct *task, u64 addr, void *callback_fn, void *callback_ctx, u64 flags)
+ *	Description
+ *		Find vma of *task* that contains *addr*, call *callback_fn*
+ *		function with *task*, *vma*, and *callback_ctx*.
+ *		The *callback_fn* should be a static function and
+ *		the *callback_ctx* should be a pointer to the stack.
+ *		The *flags* is used to control certain aspects of the helper.
+ *		Currently, the *flags* must be 0.
+ *
+ *		The expected callback signature is
+ *
+ *		long (\*callback_fn)(struct task_struct \*task, struct vm_area_struct \*vma, void \*callback_ctx);
+ *
+ *	Return
+ *		0 on success.
+ *		**-ENOENT** if *task->mm* is NULL, or no vma contains *addr*.
+ *		**-EBUSY** if failed to try lock mmap_lock.
+ *		**-EINVAL** for invalid **flags**.
+ *
+ * long bpf_loop(u32 nr_loops, void *callback_fn, void *callback_ctx, u64 flags)
+ *	Description
+ *		For **nr_loops**, call **callback_fn** function
+ *		with **callback_ctx** as the context parameter.
+ *		The **callback_fn** should be a static function and
+ *		the **callback_ctx** should be a pointer to the stack.
+ *		The **flags** is used to control certain aspects of the helper.
+ *		Currently, the **flags** must be 0. Currently, nr_loops is
+ *		limited to 1 << 23 (~8 million) loops.
+ *
+ *		long (\*callback_fn)(u32 index, void \*ctx);
+ *
+ *		where **index** is the current index in the loop. The index
+ *		is zero-indexed.
+ *
+ *		If **callback_fn** returns 0, the helper will continue to the next
+ *		loop. If return value is 1, the helper will skip the rest of
+ *		the loops and return. Other return values are not used now,
+ *		and will be rejected by the verifier.
+ *
+ *	Return
+ *		The number of loops performed, **-EINVAL** for invalid **flags**,
+ *		**-E2BIG** if **nr_loops** exceeds the maximum number of loops.
  */
 #define __BPF_FUNC_MAPPER(FN)		\
 	FN(unspec),			\
@@ -4089,6 +4184,12 @@ union bpf_attr {
 	FN(timer_start),		\
 	FN(timer_cancel),		\
 	FN(task_pt_regs),		\
+	FN(get_branch_snapshot),	\
+	FN(trace_vprintk),		\
+	FN(skc_to_unix_sock),		\
+	FN(kallsyms_lookup_name),	\
+	FN(find_vma),			\
+	FN(loop),			\
 	/* */
 
 /* integer value in 'imm' field of BPF_CALL instruction selects which helper
