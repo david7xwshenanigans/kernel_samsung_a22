@@ -5117,6 +5117,12 @@ static int check_map_func_compatibility(struct bpf_verifier_env *env,
 	if (!map)
 		return 0;
 
+	if (func_id == BPF_FUNC_map_lookup_percpu_elem &&
+	    map->map_type != BPF_MAP_TYPE_PERCPU_ARRAY &&
+	    map->map_type != BPF_MAP_TYPE_PERCPU_HASH &&
+	    map->map_type != BPF_MAP_TYPE_LRU_PERCPU_HASH)
+		goto error;
+
 	/* We need a two way check, first is from map perspective ... */
 	switch (map->map_type) {
 	case BPF_MAP_TYPE_PROG_ARRAY:
@@ -5845,7 +5851,8 @@ record_func_map(struct bpf_verifier_env *env, struct bpf_call_arg_meta *meta,
 	    func_id != BPF_FUNC_map_push_elem &&
 	    func_id != BPF_FUNC_map_pop_elem &&
 	    func_id != BPF_FUNC_map_peek_elem &&
-	    func_id != BPF_FUNC_for_each_map_elem)
+	    func_id != BPF_FUNC_for_each_map_elem &&
+	    func_id != BPF_FUNC_map_lookup_percpu_elem)
 		return 0;
 
 	if (map == NULL) {
@@ -12479,7 +12486,8 @@ static int fixup_bpf_calls(struct bpf_verifier_env *env)
 		     insn->imm == BPF_FUNC_map_delete_elem ||
 		     insn->imm == BPF_FUNC_map_push_elem   ||
 		     insn->imm == BPF_FUNC_map_pop_elem    ||
-		     insn->imm == BPF_FUNC_map_peek_elem)) {
+		     insn->imm == BPF_FUNC_map_peek_elem   ||
+		     insn->imm == BPF_FUNC_map_lookup_percpu_elem)) {
 			aux = &env->insn_aux_data[i + delta];
 			if (bpf_map_ptr_poisoned(aux))
 				goto patch_call_imm;
@@ -12521,6 +12529,9 @@ static int fixup_bpf_calls(struct bpf_verifier_env *env)
 				     (int (*)(struct bpf_map *map, void *value))NULL));
 			BUILD_BUG_ON(!__same_type(ops->map_peek_elem,
 				     (int (*)(struct bpf_map *map, void *value))NULL));
+			BUILD_BUG_ON(!__same_type(ops->map_lookup_percpu_elem,
+				     (void *(*)(struct bpf_map *map, void *key,
+						u32 cpu))NULL));
 patch_map_ops_generic:
 			switch (insn->imm) {
 			case BPF_FUNC_map_lookup_elem:
@@ -12545,6 +12556,10 @@ patch_map_ops_generic:
 				continue;
 			case BPF_FUNC_map_peek_elem:
 				insn->imm = BPF_CAST_CALL(ops->map_peek_elem) -
+					    __bpf_call_base;
+				continue;
+			case BPF_FUNC_map_lookup_percpu_elem:
+				insn->imm = BPF_CAST_CALL(ops->map_lookup_percpu_elem) -
 					    __bpf_call_base;
 				continue;
 			}
