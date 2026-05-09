@@ -37,12 +37,20 @@ struct bpf_ringbuf {
 	struct page **pages;
 	int nr_pages;
 	spinlock_t spinlock ____cacheline_aligned_in_smp;
-	/* Consumer and producer counters are put into separate pages to allow
-	 * mapping consumer page as r/w, but restrict producer page to r/o.
-	 * This protects producer position from being modified by user-space
-	 * application and ruining in-kernel position tracking.
-	 * Note that the pending counter is placed in the same
-	 * page as the producer, so that it shares the same cache line.
+	/* Consumer and producer counters are put into separate pages to
+	 * allow each position to be mapped with different permissions.
+	 * This prevents user-space from modifying the wrong position and
+	 * ruining in-kernel tracking.
+	 *
+	 * Kernel-producer ringbuf maps expose the consumer position as
+	 * writable and everything else as read-only.
+	 *
+	 * User-producer ringbuf maps expose the consumer position as
+	 * read-only and allow writes to the producer position and data
+	 * pages.
+	 *
+	 * Note that the pending counter is placed in the same page as the
+	 * producer, so that it shares the same cache line.
 	 */
 	unsigned long consumer_pos __aligned(PAGE_SIZE);
 	unsigned long producer_pos __aligned(PAGE_SIZE);
@@ -246,7 +254,7 @@ static int ringbuf_map_get_next_key(struct bpf_map *map, void *key,
 	return -ENOTSUPP;
 }
 
-static int ringbuf_map_mmap(struct bpf_map *map, struct vm_area_struct *vma)
+static int ringbuf_map_mmap_kern(struct bpf_map *map, struct vm_area_struct *vma)
 {
 	struct bpf_ringbuf_map *rb_map;
 
@@ -255,6 +263,23 @@ static int ringbuf_map_mmap(struct bpf_map *map, struct vm_area_struct *vma)
 	if (vma->vm_flags & VM_WRITE) {
 		/* allow writable mapping for the consumer_pos only */
 		if (vma->vm_pgoff != 0 || vma->vm_end - vma->vm_start != PAGE_SIZE)
+			return -EPERM;
+	} else {
+		vma->vm_flags &= ~VM_MAYWRITE;
+	}
+	/* remap_vmalloc_range() checks size and offset constraints */
+	return remap_vmalloc_range(vma, rb_map->rb,
+				   vma->vm_pgoff + RINGBUF_PGOFF);
+}
+
+static int ringbuf_map_mmap_user(struct bpf_map *map, struct vm_area_struct *vma)
+{
+	struct bpf_ringbuf_map *rb_map;
+
+	rb_map = container_of(map, struct bpf_ringbuf_map, map);
+
+	if (vma->vm_flags & VM_WRITE) {
+		if (vma->vm_pgoff == 0)
 			return -EPERM;
 	} else {
 		vma->vm_flags &= ~VM_MAYWRITE;
@@ -291,7 +316,7 @@ const struct bpf_map_ops ringbuf_map_ops = {
 	.map_meta_equal = bpf_map_meta_equal,
 	.map_alloc = ringbuf_map_alloc,
 	.map_free = ringbuf_map_free,
-	.map_mmap = ringbuf_map_mmap,
+	.map_mmap = ringbuf_map_mmap_kern,
 	.map_poll = ringbuf_map_poll,
 	.map_lookup_elem = ringbuf_map_lookup_elem,
 	.map_update_elem = ringbuf_map_update_elem,
@@ -299,6 +324,20 @@ const struct bpf_map_ops ringbuf_map_ops = {
 	.map_get_next_key = ringbuf_map_get_next_key,
 	.map_btf_name = "bpf_ringbuf_map",
 	.map_btf_id = &ringbuf_map_btf_id,
+};
+
+static int user_ringbuf_map_btf_id;
+const struct bpf_map_ops user_ringbuf_map_ops = {
+	.map_meta_equal = bpf_map_meta_equal,
+	.map_alloc = ringbuf_map_alloc,
+	.map_free = ringbuf_map_free,
+	.map_mmap = ringbuf_map_mmap_user,
+	.map_lookup_elem = ringbuf_map_lookup_elem,
+	.map_update_elem = ringbuf_map_update_elem,
+	.map_delete_elem = ringbuf_map_delete_elem,
+	.map_get_next_key = ringbuf_map_get_next_key,
+	.map_btf_name = "bpf_ringbuf_map",
+	.map_btf_id = &user_ringbuf_map_btf_id,
 };
 
 /* Given pointer to ring buffer record metadata and struct bpf_ringbuf itself,
