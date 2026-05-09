@@ -60,7 +60,12 @@ struct bpf_reg_state {
 		u32 mem_size; /* for PTR_TO_MEM | PTR_TO_MEM_OR_NULL */
 
 		/* Max size from any of the above. */
-		unsigned long raw;
+		struct {
+			unsigned long raw1;
+			unsigned long raw2;
+		} raw;
+
+		u32 subprogno; /* for PTR_TO_FUNC */
 	};
 	/* Fixed part of pointer offset, pointer types only */
 	s32 off;
@@ -199,6 +204,7 @@ struct bpf_func_state {
 	int acquired_refs;
 	struct bpf_reference_state *refs;
 	int allocated_stack;
+	bool in_callback_fn;
 	struct bpf_stack_state *stack;
 };
 
