@@ -13,9 +13,12 @@
 #include <linux/filter.h>
 #include <linux/ctype.h>
 #include <linux/jiffies.h>
+#include <linux/mm.h>
 #include <linux/pid_namespace.h>
 #include <linux/proc_ns.h>
 #include <linux/timekeeping.h>
+#include <linux/btf_ids.h>
+#include <uapi/linux/btf.h>
 
 #include "../../lib/kstrtox.h"
 
@@ -696,6 +699,40 @@ const struct bpf_func_proto bpf_copy_from_user_proto = {
 	.arg1_type	= ARG_PTR_TO_UNINIT_MEM,
 	.arg2_type	= ARG_CONST_SIZE_OR_ZERO,
 	.arg3_type	= ARG_ANYTHING,
+};
+
+BTF_ID_LIST_SINGLE(bpf_copy_from_user_task_btf_ids, struct, task_struct)
+
+BPF_CALL_5(bpf_copy_from_user_task, void *, dst, u32, size,
+	   const void __user *, user_ptr, struct task_struct *, tsk, u64, flags)
+{
+	int ret;
+
+	/* flags is not used yet */
+	if (unlikely(flags))
+		return -EINVAL;
+
+	if (unlikely(!size))
+		return 0;
+
+	ret = access_process_vm(tsk, (unsigned long)user_ptr, dst, size, 0);
+	if (ret == size)
+		return 0;
+
+	memset(dst, 0, size);
+	return ret < 0 ? ret : -EFAULT;
+}
+
+const struct bpf_func_proto bpf_copy_from_user_task_proto = {
+	.func		= bpf_copy_from_user_task,
+	.gpl_only	= true,
+	.ret_type	= RET_INTEGER,
+	.arg1_type	= ARG_PTR_TO_UNINIT_MEM,
+	.arg2_type	= ARG_CONST_SIZE_OR_ZERO,
+	.arg3_type	= ARG_ANYTHING,
+	.arg4_type	= ARG_PTR_TO_BTF_ID,
+	.arg4_btf_id	= &bpf_copy_from_user_task_btf_ids[0],
+	.arg5_type	= ARG_ANYTHING,
 };
 
 BPF_CALL_2(bpf_per_cpu_ptr, const void *, ptr, u32, cpu)
