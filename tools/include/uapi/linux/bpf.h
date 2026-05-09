@@ -4133,6 +4133,16 @@ union bpf_attr {
  * 		Execute bpf syscall with given arguments.
  * 	Return
  * 		A syscall result.
+ *
+ * long bpf_strncmp(const char *s1, u32 s1_sz, const char *s2)
+ *	Description
+ *		Do strncmp() between **s1** and **s2**. **s1** doesn't need
+ *		to be null-terminated and **s1_sz** is the maximum storage
+ *		size of **s1**. **s2** must be a read-only string.
+ *	Return
+ *		An integer less than, equal to, or greater than zero
+ *		if the first **s1_sz** bytes of **s1** is found to be
+ *		less than, to match, or be greater than **s2**.
  */
 #define __BPF_FUNC_MAPPER(FN)		\
 	FN(unspec),			\
@@ -4313,6 +4323,7 @@ union bpf_attr {
 	FN(kallsyms_lookup_name),	\
 	FN(find_vma),			\
 	FN(loop),			\
+	FN(strncmp),			\
 	/* */
 
 /* integer value in 'imm' field of BPF_CALL instruction selects which helper
