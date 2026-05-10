@@ -58,11 +58,67 @@
 #include <linux/pagevec.h>
 
 #include <asm/tlbflush.h>
+#include <linux/swapops.h>
+#include <linux/huge_mm.h>
+
+#ifndef vma_is_accessible
+#define vma_is_accessible(vma) ((vma)->vm_flags & (VM_READ | VM_WRITE | VM_EXEC))
+#endif
+
+#ifndef mmap_read_trylock
+#define mmap_read_trylock(mm) down_read_trylock(&(mm)->mmap_sem)
+#endif
+
+#ifndef mmap_read_unlock
+#define mmap_read_unlock(mm) up_read(&(mm)->mmap_sem)
+#endif
+
+#ifndef free_unref_page_list
+#define free_unref_page_list(list) free_hot_cold_page_list(list, false)
+#endif
+
+#ifndef pud_leaf
+#define pud_leaf(pud) pud_huge(pud)
+#endif
+
+#ifndef is_huge_zero_pmd
+#define is_huge_zero_pmd(pmd) false
+#endif
+
+static inline void move_pages_to_lru(struct lruvec *lruvec, struct list_head *list)
+{
+	struct page *page;
+
+	while (!list_empty(list)) {
+		page = lru_to_page(list);
+		list_del(&page->lru);
+
+		add_page_to_lru_list(page, lruvec, page_lru(page));
+	}
+}
 
 #define thp_nr_pages(page) \
 	(PageTransHuge(page) ? HPAGE_PMD_NR : 1)
 #define page_is_file_lru(page) \
 	page_is_file_cache(page)
+
+#ifdef CONFIG_MEMCG
+#undef mem_cgroup_id
+#define mem_cgroup_id(memcg) ((memcg) ? (memcg)->id.id : 0)
+#endif
+
+#ifndef cgroup_reclaim
+#define cgroup_reclaim(sc) (!global_reclaim(sc))
+#endif
+
+#ifndef skip_cma
+#define skip_cma(page, sc) false
+#endif
+
+#ifndef set_task_reclaim_state
+#define set_task_reclaim_state(task, state) ((task)->reclaim_state = (state))
+#endif
+
 #include <asm/div64.h>
 
 #include <linux/swapops.h>
@@ -4662,6 +4718,17 @@ void check_move_unevictable_pages(struct page **pages, int nr_pages)
 
 #ifdef CONFIG_LRU_GEN
 
+#ifdef CONFIG_ARM64
+#include <asm/cpufeature.h>
+static inline bool arch_has_hw_pte_young(void)
+{
+	u64 mmfr1 = read_sanitised_ftr_reg(SYS_ID_AA64MMFR1_EL1);
+
+	return !!cpuid_feature_extract_unsigned_field(mmfr1, ID_AA64MMFR1_HADBS_SHIFT);
+}
+#define arch_has_hw_pte_young arch_has_hw_pte_young
+#endif
+
 #ifndef arch_has_hw_pte_young
 static inline bool arch_has_hw_pte_young(void)
 {
@@ -7251,7 +7318,7 @@ static int run_cmd(char cmd, int memcg_id, int nid, unsigned long seq,
 		break;
 	}
 done:
-	mem_cgroup_put(memcg);
+	css_put(&memcg->css);
 
 	return err;
 }
