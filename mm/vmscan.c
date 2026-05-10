@@ -55,8 +55,14 @@
 #include <linux/shmem_fs.h>
 #include <linux/ctype.h>
 #include <linux/debugfs.h>
+#include <linux/pagevec.h>
 
 #include <asm/tlbflush.h>
+
+#define thp_nr_pages(page) \
+	(PageTransHuge(page) ? HPAGE_PMD_NR : 1)
+#define page_is_file_lru(page) \
+	page_is_file_cache(page)
 #include <asm/div64.h>
 
 #include <linux/swapops.h>
@@ -130,6 +136,7 @@ struct scan_control {
 	/* help kswapd make better choices among multiple memcgs */
 	unsigned int memcgs_need_aging:1;
 	unsigned long last_reclaimed;
+	struct reclaim_state reclaim_state;
 #endif
 	/* Incremented by the number of inactive pages that were scanned */
 	unsigned long nr_scanned;
@@ -1010,7 +1017,7 @@ static unsigned long shrink_page_list(struct list_head *page_list,
 				      struct scan_control *sc,
 				      enum ttu_flags ttu_flags,
 				      struct reclaim_stat *stat,
-				      bool force_reclaim)
+				      bool ignore_references)
 {
 	LIST_HEAD(ret_pages);
 	LIST_HEAD(free_pages);
@@ -1167,7 +1174,7 @@ static unsigned long shrink_page_list(struct list_head *page_list,
 			}
 		}
 
-		if (!force_reclaim)
+		if (!ignore_references)
 			references = page_check_references(page, sc);
 
 		switch (references) {
@@ -4655,6 +4662,13 @@ void check_move_unevictable_pages(struct page **pages, int nr_pages)
 
 #ifdef CONFIG_LRU_GEN
 
+#ifndef arch_has_hw_pte_young
+static inline bool arch_has_hw_pte_young(void)
+{
+	return false;
+}
+#endif
+
 /*
  * lru_gen_caps[]: static keys that control the multi-gen LRU.
  * LRU_GEN_CORE: the core multi-gen LRU
@@ -4705,6 +4719,23 @@ static struct lruvec *get_lruvec(struct mem_cgroup *memcg, int nid)
 
 		return lruvec;
 	}
+#endif
+	return &pgdat->lruvec;
+}
+
+#ifdef CONFIG_MEMCG
+static struct mem_cgroup *get_mem_cgroup_from_mm(struct mm_struct *mm)
+{
+	struct mem_cgroup *memcg;
+
+	rcu_read_lock();
+	memcg = mem_cgroup_from_task(rcu_dereference(mm->owner));
+	if (memcg && !css_tryget_online(&memcg->css))
+		memcg = NULL;
+	rcu_read_unlock();
+
+	return memcg;
+}
 #endif
 
 static int get_swappiness(struct lruvec *lruvec, struct scan_control *sc)
@@ -4815,7 +4846,8 @@ void lru_gen_del_mm(struct mm_struct *mm)
 	spin_unlock(&mm_list->lock);
 
 #ifdef CONFIG_MEMCG
-	mem_cgroup_put(mm->lru_gen.memcg);
+	if (mm->lru_gen.memcg)
+		css_put(&mm->lru_gen.memcg->css);
 	mm->lru_gen.memcg = NULL;
 #endif
 }
@@ -5655,53 +5687,29 @@ restart:
 		goto restart;
 }
 
-static int walk_pud_range(p4d_t *p4d, unsigned long start, unsigned long end,
+static int walk_pud_range(pud_t *pud, unsigned long addr, unsigned long next,
 			  struct mm_walk *args)
 {
-	int i;
-	pud_t *pud;
-	unsigned long addr;
-	unsigned long next;
 	struct lru_gen_mm_walk *walk = args->private;
 
-	VM_WARN_ON_ONCE(p4d_leaf(*p4d));
+	if (pud_present(*pud) && !WARN_ON_ONCE(pud_leaf(*pud)))
+		walk_pmd_range(pud, addr, next, args);
 
-	pud = pud_offset(p4d, start & P4D_MASK);
-restart:
-	for (i = pud_index(start), addr = start; addr != end; i++, addr = next) {
-		pud_t val = READ_ONCE(pud[i]);
-
-		next = pud_addr_end(addr, end);
-
-		if (!pud_present(val) || WARN_ON_ONCE(pud_leaf(val)))
-			continue;
-
-		walk_pmd_range(&val, addr, next, args);
-
-		if (need_resched() || walk->batched >= MAX_LRU_BATCH) {
-			end = (addr | ~PUD_MASK) + 1;
-			goto done;
-		}
+	if (need_resched() || walk->batched >= MAX_LRU_BATCH) {
+		walk->next_addr = next;
+		return -EAGAIN;
 	}
 
-	if (i < PTRS_PER_PUD && get_next_vma(P4D_MASK, PUD_SIZE, args, &start, &end))
-		goto restart;
-
-	end = round_up(end, P4D_SIZE);
-done:
-	if (!end || !args->vma)
-		return 1;
-
-	walk->next_addr = max(end, args->vma->vm_start);
-
-	return -EAGAIN;
+	return 0;
 }
 
 static void walk_mm(struct lruvec *lruvec, struct mm_struct *mm, struct lru_gen_mm_walk *walk)
 {
-	static const struct mm_walk_ops mm_walk_ops = {
+	struct mm_walk mm_walk = {
+		.pud_entry = walk_pud_range,
 		.test_walk = should_skip_vma,
-		.p4d_entry = walk_pud_range,
+		.mm = mm,
+		.private = walk,
 	};
 
 	int err;
@@ -5725,7 +5733,7 @@ static void walk_mm(struct lruvec *lruvec, struct mm_struct *mm, struct lru_gen_
 
 		/* the caller might be holding the lock for write */
 		if (mmap_read_trylock(mm)) {
-			err = walk_page_range(mm, walk->next_addr, ULONG_MAX, &mm_walk_ops, walk);
+			err = walk_page_range(walk->next_addr, ULONG_MAX, &mm_walk);
 
 			mmap_read_unlock(mm);
 		}
@@ -6801,7 +6809,7 @@ static bool fill_evictable(struct lruvec *lruvec)
 			VM_WARN_ON_ONCE_PAGE(page_is_file_lru(page) != type, page);
 			VM_WARN_ON_ONCE_PAGE(page_lru_gen(page) != -1, page);
 
-			del_page_from_lru_list(page, lruvec);
+			del_page_from_lru_list(page, lruvec, page_lru(page));
 			success = lru_gen_add_page(lruvec, page, false);
 			VM_WARN_ON_ONCE(!success);
 
@@ -6832,7 +6840,7 @@ static bool drain_evictable(struct lruvec *lruvec)
 
 			success = lru_gen_del_page(lruvec, page, false);
 			VM_WARN_ON_ONCE(!success);
-			add_page_to_lru_list(page, lruvec);
+			add_page_to_lru_list(page, lruvec, page_lru(page));
 
 			if (!--remaining)
 				return false;
@@ -7390,10 +7398,6 @@ void lru_gen_exit_memcg(struct mem_cgroup *memcg)
 	}
 }
 #endif
-
-void lru_gen_look_around(struct page_vma_mapped_walk *pvmw)
-{
-}
 
 static int __init lru_gen_init(void)
 {

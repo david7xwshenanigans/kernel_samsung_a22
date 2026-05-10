@@ -15,6 +15,7 @@
 #include <linux/dax.h>
 #include <linux/fs.h>
 #include <linux/mm.h>
+#include <linux/mm_inline.h>
 
 /*
  *		Double CLOCK lists
@@ -223,8 +224,8 @@ static void *lru_gen_eviction(struct page *page)
 	unsigned long min_seq;
 	struct lruvec *lruvec;
 	struct lru_gen_struct *lrugen;
-	int type = page_is_file_lru(page);
-	int delta = thp_nr_pages(page);
+	int type = page_is_file_cache(page);
+	int delta = PageTransHuge(page) ? HPAGE_PMD_NR : 1;
 	int refs = page_lru_refs(page);
 	int tier = lru_tier_from_refs(refs);
 	struct mem_cgroup *memcg = page_memcg(page);
@@ -237,7 +238,7 @@ static void *lru_gen_eviction(struct page *page)
 	min_seq = READ_ONCE(lrugen->min_seq[type]);
 	token = (min_seq << LRU_REFS_WIDTH) | max(refs - 1, 0);
 
-	hist = lru_hist_from_seq(min_seq);
+	hist = min_seq % NR_HIST_GENS;
 	atomic_long_add(delta, &lrugen->evicted[hist][type][tier]);
 
 	return pack_shadow(mem_cgroup_id(memcg), pgdat, token, refs);
@@ -254,8 +255,8 @@ static void lru_gen_refault(struct page *page, void *shadow)
 	struct lru_gen_struct *lrugen;
 	struct mem_cgroup *memcg;
 	struct pglist_data *pgdat;
-	int type = page_is_file_lru(page);
-	int delta = thp_nr_pages(page);
+	int type = page_is_file_cache(page);
+	int delta = PageTransHuge(page) ? HPAGE_PMD_NR : 1;
 
 	unpack_shadow(shadow, &memcg_id, &pgdat, &token, &workingset);
 
@@ -277,7 +278,7 @@ static void lru_gen_refault(struct page *page, void *shadow)
 	if ((token >> LRU_REFS_WIDTH) != (min_seq & (EVICTION_MASK >> LRU_REFS_WIDTH)))
 		goto unlock;
 
-	hist = lru_hist_from_seq(min_seq);
+	hist = min_seq % NR_HIST_GENS;
 	/* see the comment in page_lru_refs() */
 	refs = (token & (BIT(LRU_REFS_WIDTH) - 1)) + workingset;
 	tier = lru_tier_from_refs(refs);
@@ -292,7 +293,7 @@ static void lru_gen_refault(struct page *page, void *shadow)
 	 * 2. For pages accessed multiple times through file descriptors,
 	 *    numbers of accesses might have been out of the range.
 	 */
-	if (lru_gen_in_fault() || refs == BIT(LRU_REFS_WIDTH)) {
+	if (current->in_lru_fault || refs == BIT(LRU_REFS_WIDTH)) {
 		SetPageWorkingset(page);
 		mod_lruvec_state(lruvec, WORKINGSET_RESTORE_BASE + type, delta);
 	}

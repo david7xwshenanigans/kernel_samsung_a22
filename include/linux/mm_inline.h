@@ -129,16 +129,31 @@ static inline bool lru_gen_in_fault(void)
 	return current->in_lru_fault;
 }
 
+static inline int thp_nr_pages(struct page *page)
+{
+	return PageTransHuge(page) ? HPAGE_PMD_NR : 1;
+}
+
+static inline bool page_is_file_lru(struct page *page)
+{
+	return page_is_file_cache(page);
+}
+
 static inline int lru_gen_from_seq(unsigned long seq)
 {
 	return seq % MAX_NR_GENS;
+}
+
+static inline int lru_hist_from_seq(unsigned long seq)
+{
+	return seq % NR_HIST_GENS;
 }
 
 static inline int lru_tier_from_refs(int refs)
 {
 	VM_WARN_ON_ONCE(refs > BIT(LRU_REFS_WIDTH));
 
-	/* see the comment on MAX_NR_TIERS */
+	/* see the comment in page_lru_refs() */
 	return order_base_2(refs + 1);
 }
 
