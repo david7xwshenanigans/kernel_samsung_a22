@@ -1,9 +1,9 @@
 # SPDX-License-Identifier: GPL-2.0
 VERSION = 4
 PATCHLEVEL = 14
-SUBLEVEL = 368
-EXTRAVERSION = -capybara
-NAME = Resilient CIP Capybara
+SUBLEVEL = 369
+EXTRAVERSION = -omniver
+NAME = Omniscient Verifier
 
 # *DOCUMENTATION*
 # To see a list of typical targets execute "make help"
