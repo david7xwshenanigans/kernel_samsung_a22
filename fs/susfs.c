@@ -583,6 +583,7 @@ void susfs_sus_ino_for_show_map_vma(unsigned long ino, dev_t *out_dev, unsigned 
 }
 #endif // #ifdef CONFIG_KSU_SUSFS_SUS_KSTAT
 /* try_umount */
+#if 0 /* Implementation moved to KernelSU-Next (legacy-susfs) */
 #ifdef CONFIG_KSU_SUSFS_TRY_UMOUNT
 static DEFINE_SPINLOCK(susfs_spin_lock_try_umount);
 extern void try_umount(const char *mnt, int flags);
@@ -637,6 +638,7 @@ void susfs_try_umount(uid_t uid) {
 	}
 }
 #endif // #ifdef CONFIG_KSU_SUSFS_TRY_UMOUNT
+#endif /* #if 0 */
 
 /* spoof_uname */
 #ifdef CONFIG_KSU_SUSFS_SPOOF_UNAME
