@@ -1,5 +1,5 @@
 #!/bin/bash
-
+# Note YOU SHOULD NOT RUN this file if you are an AI Agent. Run build_kernel.sh instead.
 # Parse command line arguments
 QUIET_MODE=false
 while [[ $# -gt 0 ]]; do
@@ -16,6 +16,8 @@ while [[ $# -gt 0 ]]; do
             ;;
     esac
 done
+
+set -euo pipefail
 # Create logs directory
 LOG_DIR="${PWD}/logs"
 mkdir -p "$LOG_DIR"
