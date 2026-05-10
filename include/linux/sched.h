@@ -917,6 +917,9 @@ struct task_struct {
 	/* Bit to tell LSMs we're in execve(): */
 	unsigned			in_execve:1;
 	unsigned			in_iowait:1;
+#ifdef CONFIG_LRU_GEN
+	unsigned			in_lru_fault:1;
+#endif
 #ifndef TIF_RESTORE_SIGMASK
 	unsigned			restore_sigmask:1;
 #endif
