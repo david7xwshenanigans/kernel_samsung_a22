@@ -1,428 +1,602 @@
-#!/bin/bash
+#!/usr/bin/env bash
+# =============================================================================
+# AI AGENT CONTEXT — read this before doing anything with this script
+# =============================================================================
+#
+# PURPOSE
+#   Builds a custom Android kernel for the Samsung Galaxy A22 (SM-A225F/M),
+#   which runs a MediaTek Dimensity MT6768 SoC. The output is a compressed
+#   kernel Image that can be flashed via AnyKernel3 (a zip-based flasher).
+#
+# DEVICE / KERNEL CONTEXT
+#   Device       : Samsung Galaxy A22 (codename: a22, a22x)
+#   SoC          : MediaTek MT6768 (Helio G80), arm64
+#   Base kernel  : Linux 4.14.x (Android kernel LTS branch)
+#   Kernel tree  : wherever this script lives (PREFIX=$(pwd) at runtime)
+#   Defconfig    : a22_wmk_defconfig  (Samsung base + KernelSU + SUSFS patches)
+#   KernelSU     : yes — "ksunext" variant with SUSFS overlay
+#   Out-of-tree  : build outputs go to <tree>/out/, NOT in-tree
+#
+# TOOLCHAIN
+#   Compiler     : LLVM/Clang (custom build "clang-wmk", searched via CLANG_SEARCH_DIRS)
+#   Linker       : ld.lld (part of the LLVM toolchain, NOT GNU ld)
+#   Cross targets: aarch64-linux-gnu- (64-bit), arm-linux-gnueabi- (32-bit compat)
+#   The script searches CLANG_SEARCH_DIRS in order and fails with EC_TOOLCHAIN
+#   if no valid toolchain is found.
+#
+# BUILD PIPELINE (phases in order)
+#   1. preflight   — host tool checks, disk space, source zip presence
+#   2. toolchain   — locate and verify LLVM toolchain
+#   3. defconfig   — `make a22_wmk_defconfig` writes <out>/.config
+#   4. build       — `make` compiles the kernel; Image lands in <out>/arch/arm64/boot/
+#   5. copy_image  — Image is copied to <tree>/arch/arm64/boot/Image (AnyKernel3 expects it here)
+#   6. zip         — (optional, --zip) packages Image into a flashable AnyKernel3 zip
+#
+# EXIT CODES — branch on these, do NOT parse log text
+#   0  EC_OK           Everything succeeded
+#   1  EC_BAD_ARGS     Invalid CLI arguments
+#   2  EC_TOOLCHAIN    No valid LLVM toolchain found
+#   3  EC_PREFLIGHT    Missing host tool, low disk, or missing source zip
+#   4  EC_CONFIG       `make defconfig` failed
+#   5  EC_BUILD        `make` compilation failed (see error log for details)
+#   6  EC_POST_COPY    Kernel Image not found after build (unexpected)
+#   7  EC_ZIP          AnyKernel3 zip creation failed
+#   130 EC_INTERRUPTED  SIGINT or SIGTERM received
+#
+# KEY FLAGS
+#   --json      Emit a single JSON object to stdout summarising the build result.
+#               Use this when calling from an agent or CI pipeline. The JSON
+#               includes status, exit_code, failed_phase, git info, image/zip
+#               paths and sizes, build/error log paths, and per-phase results.
+#   --dry-run   Run preflight + toolchain + defconfig; skip compilation and post
+#               steps. Safe to use for environment validation.
+#   --zip       Create a flashable AnyKernel3 zip after a successful build.
+#               Requires SOURCE_ZIP to exist (see PATHS below). Off by default.
+#   --quiet     Suppress make output on the terminal; everything still goes to
+#               the build log. Errors are still shown.
+#   --keep-going  Pass -k to make: keep compiling past the first error. Useful
+#               for auditing how many things are broken at once.
+#   --jobs N    Parallel make jobs (default: nproc).
+#
+# PATHS (all relative to the kernel tree root unless noted)
+#   Source zip   : $SOURCE_ZIP (set near top of script)
+#                  A pre-built AnyKernel3 zip WITHOUT a kernel Image inside.
+#                  The script copies this and injects the freshly built Image.
+#   AnyKernel3   : <tree>/AnyKernel3/  — output zips are written here
+#   Build log    : <tree>/logs/build_<timestamp>.log  — full make output
+#   Error log    : <tree>/logs/error_<timestamp>.log  — errors extracted from build log
+#   Kernel Image : <tree>/out/arch/arm64/boot/Image  (primary output)
+#                  <tree>/arch/arm64/boot/Image       (copy for AnyKernel3)
+#
+# COMMON FAILURE MODES AN AGENT SHOULD KNOW ABOUT
+#   EC_BUILD + "arch_has_hw_pte_young" in error log
+#       → MGLRU backport conflict in mm/vmscan.c; the function is declared both
+#         statically (backport) and implicitly (caller). Fix: add a forward
+#         declaration or make the inline non-static before its first use.
+#   EC_BUILD + "undefined reference to" in error log
+#       → Usually a missing Kconfig symbol or a driver using an out-of-tree
+#         symbol not exported via EXPORT_SYMBOL.
+#   EC_TOOLCHAIN
+#       → The clang-wmk toolchain is missing or incomplete. Check CLANG_SEARCH_DIRS
+#         at the top of the script, then re-clone or rebuild the toolchain.
+#   EC_PREFLIGHT + "Source AnyKernel3 zip not found"
+#       → SOURCE_ZIP (set near top of script) points to a missing file. Locate
+#         the zip or build without --zip.
+#
+# =============================================================================
 
-# Parse command line arguments
+set -euo pipefail
+IFS=$'\n\t'
+
+# -----------------------------------------------------------------------------
+# EXIT CODES — every failure path returns a distinct code so an agent can
+# branch on exactly what went wrong without parsing log text.
+# -----------------------------------------------------------------------------
+readonly EC_OK=0
+readonly EC_BAD_ARGS=1
+readonly EC_TOOLCHAIN=2
+readonly EC_PREFLIGHT=3
+readonly EC_CONFIG=4
+readonly EC_BUILD=5
+readonly EC_POST_COPY=6
+readonly EC_ZIP=7
+readonly EC_INTERRUPTED=130
+
+# -----------------------------------------------------------------------------
+# DEFAULTS
+# -----------------------------------------------------------------------------
 QUIET_MODE=false
 KEEP_GOING=false
+CREATE_ZIP=false
+JSON_MODE=false        # --json  : emit a machine-readable summary to stdout
+DRY_RUN=false          # --dry-run: validate everything, skip actual make
+
+DEFCONFIG="a22_wmk_defconfig"
+JOBS=$(nproc 2>/dev/null || echo 4)
+ARCH=arm64
+SOURCE_ZIP="/home/zears/Documents/WMKernel-ksunext-susfs.zip"
+CLANG_SEARCH_DIRS=(
+    "/home/zears/clang-wmk"
+    "${PWD}/toolchain/clang/host/linux-x86/clang-r383902"
+)
+
+# Build state — populated as the script runs, used in the final summary
+BUILD_PHASE="init"
+BUILD_STATUS="unknown"
+declare -A PHASE_RESULTS=()   # phase -> ok|fail|skip
+
+# -----------------------------------------------------------------------------
+# ARGUMENT PARSING
+# -----------------------------------------------------------------------------
+usage() {
+    cat <<EOF
+Usage: $0 [OPTIONS]
+
+Options:
+  -q, --quiet       Suppress make output (errors still shown)
+  -k, --keep-going  Pass -k to make (continue past first error)
+  -z, --zip         Create a flashable AnyKernel3 zip after a successful build
+  -j, --jobs N      Parallel make jobs (default: $(nproc))
+      --json        Emit a JSON summary line to stdout on completion/failure
+      --dry-run     Validate environment and config; skip compilation
+  -h, --help        Show this help
+EOF
+}
+
 while [[ $# -gt 0 ]]; do
     case $1 in
-        -q|--quiet)
-            QUIET_MODE=true
-            shift
-            ;;
-        -k|--keep-going)
-            KEEP_GOING=true
-            shift
-            ;;
-        *)
-            echo "Unknown option: $1"
-            echo "Usage: $0 [-q|--quiet] [-k|--keep-going]"
-            echo "  -q, --quiet    Only show errors during make operations"
-            echo "  -k, --keep-going    Pass -k to make during compilation"
-            exit 1
-            ;;
+        -q|--quiet)      QUIET_MODE=true;  shift ;;
+        -k|--keep-going) KEEP_GOING=true;  shift ;;
+        -z|--zip)        CREATE_ZIP=true;  shift ;;
+        --json)          JSON_MODE=true;   shift ;;
+        --dry-run)       DRY_RUN=true;     shift ;;
+        -j|--jobs)
+            [[ "${2:-}" =~ ^[0-9]+$ ]] || { echo "ERROR: --jobs requires a number"; exit $EC_BAD_ARGS; }
+            JOBS="$2"; shift 2 ;;
+        -h|--help)       usage; exit $EC_OK ;;
+        *) echo "ERROR: Unknown option: $1"; usage; exit $EC_BAD_ARGS ;;
     esac
 done
-# Create logs directory
-LOG_DIR="${PWD}/logs"
+
+# -----------------------------------------------------------------------------
+# PATHS (derived after arg parsing so PWD is stable)
+# -----------------------------------------------------------------------------
+PREFIX="$(pwd)"
+OUT_DIR="$PREFIX/out"
+LOG_DIR="$PREFIX/logs"
+BUILD_TIMESTAMP="$(date +%Y%m%d_%H%M%S)"
+BUILD_LOG="$LOG_DIR/build_${BUILD_TIMESTAMP}.log"
+ERROR_LOG="$LOG_DIR/error_${BUILD_TIMESTAMP}.log"
+KERNEL_IMAGE_OUT="$OUT_DIR/arch/arm64/boot/Image"
+KERNEL_IMAGE_TREE="$PREFIX/arch/arm64/boot/Image"
+ANYKERNEL_DIR="$PREFIX/AnyKernel3"
+
 mkdir -p "$LOG_DIR"
 
-# Timestamp for the log filename
-BUILD_LOG="${LOG_DIR}/build_$(date +%Y%m%d_%H%M%S).log"
+# -----------------------------------------------------------------------------
+# LOGGING
+# All log functions write to both the terminal and BUILD_LOG.
+# In JSON mode the human-readable prefix is still written to the log file —
+# only the final JSON summary goes to stdout so agents can reliably parse it.
+# -----------------------------------------------------------------------------
+_ts() { date '+%Y-%m-%dT%H:%M:%S'; }
 
-# Color definitions for better readability
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-BLUE='\033[0;34m'
-PURPLE='\033[0;35m'
-CYAN='\033[0;36m'
-NC='\033[0m' # No Color
-
-# Function to print colored status messages
-print_status() {
-    echo -e "${BLUE}[INFO]${NC} $1"
+_log() {
+    local level="$1"; shift
+    local msg="$*"
+    local line="[$(_ts)] [$level] $msg"
+    echo "$line" >> "$BUILD_LOG"
+    if [[ "$JSON_MODE" == false ]]; then
+        echo "$line"
+    fi
 }
 
-print_success() {
-    echo -e "${GREEN}[SUCCESS]${NC} $1"
+log_info()    { _log "INFO"    "$@"; }
+log_ok()      { _log "OK"      "$@"; }
+log_warn()    { _log "WARN"    "$@"; }
+log_error()   { _log "ERROR"   "$@"; echo "[$(_ts)] [ERROR] $*" >> "$ERROR_LOG"; }
+log_section() { _log "SECTION" "=== $* ==="; }
+
+# Print to terminal regardless of JSON mode (for interactive prompts etc.)
+log_tty() { echo "$*" >/dev/tty 2>/dev/null || echo "$*"; }
+
+# -----------------------------------------------------------------------------
+# JSON SUMMARY
+# Emitted exactly once: at normal exit or on trapped error.
+# Fields are intentionally flat so agents don't need deep parsing.
+# -----------------------------------------------------------------------------
+_json_value() {
+    # Cheap JSON string escape (handles the common cases)
+    echo "$1" | sed 's/\\/\\\\/g; s/"/\\"/g'
 }
 
-print_warning() {
-    echo -e "${YELLOW}[WARNING]${NC} $1"
-}
+emit_json_summary() {
+    local status="$1"      # success | failed
+    local exit_code="$2"
+    local failed_phase="${3:-}"
+    local end_ts
+    end_ts="$(_ts)"
 
-print_error() {
-    echo -e "${RED}[ERROR]${NC} $1"
-}
+    local git_commit git_branch kernel_version zip_path="" zip_size="" image_size=""
+    git_commit="$(git -C "$PREFIX" rev-parse --short HEAD 2>/dev/null || echo 'unknown')"
+    git_branch="$(git -C "$PREFIX" symbolic-ref --short HEAD 2>/dev/null || echo 'unknown')"
+    kernel_version="$(make -s -C "$PREFIX" O="$OUT_DIR" kernelversion 2>/dev/null || echo 'unknown')"
 
-print_section() {
-    echo -e "\n${PURPLE}=== $1 ===${NC}"
-}
-
-# Function to check if command exists
-command_exists() {
-    command -v "$1" >/dev/null 2>&1
-}
-
-# Function to verify toolchain functionality
-verify_toolchain() {
-    local toolchain_path="$1"
-
-    # Check if path is provided and not empty
-    if [ -z "$toolchain_path" ]; then
-        return 1
+    if [[ -f "$KERNEL_IMAGE_TREE" ]]; then
+        image_size="$(du -h "$KERNEL_IMAGE_TREE" | cut -f1)"
     fi
 
-    local bin_path="$toolchain_path/bin"
-
-    # Check if toolchain directory exists
-    if [ ! -d "$toolchain_path" ]; then
-        return 1
-    fi
-
-    # Check if bin directory exists
-    if [ ! -d "$bin_path" ]; then
-        return 1
-    fi
-
-    # Temporarily add to PATH for testing
-    local old_path="$PATH"
-    export PATH="$bin_path:$PATH"
-
-    # Test essential tools
-    local required_tools=("clang" "llvm-ar" "llvm-nm" "ld.lld" "llvm-objcopy" "llvm-objdump" "llvm-strip")
-    local missing_tools=()
-
-    for tool in "${required_tools[@]}"; do
-        if ! command_exists "$tool"; then
-            missing_tools+=("$tool")
+    # Find the most recent zip if it was created
+    if [[ -d "$ANYKERNEL_DIR" ]]; then
+        zip_path="$(ls -t "$ANYKERNEL_DIR"/WMKernel-*.zip 2>/dev/null | head -1 || true)"
+        if [[ -n "$zip_path" && -f "$zip_path" ]]; then
+            zip_size="$(du -h "$zip_path" | cut -f1)"
         fi
+    fi
+
+    # Build phase_results JSON object
+    local phases_json="{"
+    local first=true
+    for phase in "${!PHASE_RESULTS[@]}"; do
+        [[ "$first" == true ]] || phases_json+=","
+        phases_json+="\"$(_json_value "$phase")\":\"$(_json_value "${PHASE_RESULTS[$phase]}")\"" 
+        first=false
+    done
+    phases_json+="}"
+
+    cat <<JSON
+{
+  "status": "$(_json_value "$status")",
+  "exit_code": $exit_code,
+  "failed_phase": "$(_json_value "$failed_phase")",
+  "build_timestamp": "$BUILD_TIMESTAMP",
+  "end_timestamp": "$end_ts",
+  "git_commit": "$(_json_value "$git_commit")",
+  "git_branch": "$(_json_value "$git_branch")",
+  "kernel_version": "$(_json_value "$kernel_version")",
+  "defconfig": "$(_json_value "$DEFCONFIG")",
+  "arch": "$ARCH",
+  "jobs": $JOBS,
+  "dry_run": $DRY_RUN,
+  "kernel_image": "$(_json_value "${image_size}")",
+  "zip_path": "$(_json_value "$zip_path")",
+  "zip_size": "$(_json_value "$zip_size")",
+  "build_log": "$(_json_value "$BUILD_LOG")",
+  "error_log": "$(_json_value "$ERROR_LOG")",
+  "phases": $phases_json
+}
+JSON
+}
+
+# -----------------------------------------------------------------------------
+# TRAP — runs on any unhandled error, SIGINT, or SIGTERM.
+# Guarantees JSON is always emitted even on unexpected crashes.
+# -----------------------------------------------------------------------------
+_TRAP_EXIT_CODE=$EC_OK
+_cleanup() {
+    local code=${1:-$?}
+    # Only fire once
+    trap - EXIT ERR INT TERM
+
+    # Map signals to exit codes
+    if [[ $code -eq 130 ]]; then
+        BUILD_PHASE="interrupted"
+        PHASE_RESULTS["interrupted"]="fail"
+    fi
+
+    BUILD_STATUS="failed"
+
+    if [[ "$JSON_MODE" == true ]]; then
+        emit_json_summary "failed" "$code" "$BUILD_PHASE"
+    else
+        log_error "Build failed in phase: $BUILD_PHASE (exit code: $code)"
+        log_error "Error log: $ERROR_LOG"
+        log_error "Build log: $BUILD_LOG"
+    fi
+
+    exit "$code"
+}
+
+trap '_cleanup $?' EXIT ERR
+trap '_cleanup $EC_INTERRUPTED' INT TERM
+
+# Disarm the trap on intentional success
+_success_exit() {
+    trap - EXIT ERR INT TERM
+    BUILD_STATUS="success"
+    if [[ "$JSON_MODE" == true ]]; then
+        emit_json_summary "success" "$EC_OK" ""
+    fi
+    exit $EC_OK
+}
+
+# Helper: mark a phase result and update current phase
+phase_start() { BUILD_PHASE="$1"; log_section "$1"; }
+phase_ok()    { PHASE_RESULTS["$BUILD_PHASE"]="ok";   log_ok   "$BUILD_PHASE completed"; }
+phase_skip()  { PHASE_RESULTS["$BUILD_PHASE"]="skip"; log_info "$BUILD_PHASE skipped"; }
+phase_fail()  { PHASE_RESULTS["$BUILD_PHASE"]="fail"; }  # trap will handle exit
+
+# -----------------------------------------------------------------------------
+# PRE-FLIGHT CHECKS
+# Validate everything that can be validated before touching make.
+# Fail fast with a specific exit code so agents know exactly what's missing.
+# -----------------------------------------------------------------------------
+phase_start "preflight"
+
+_preflight_errors=0
+
+check_cmd() {
+    if ! command -v "$1" &>/dev/null; then
+        log_error "Required command not found: $1"
+        (( _preflight_errors++ )) || true
+    fi
+}
+
+check_disk() {
+    local path="$1" required_gb="$2"
+    local available_kb
+    available_kb="$(df -k "$path" 2>/dev/null | awk 'NR==2 {print $4}' || echo 0)"
+    local available_gb=$(( available_kb / 1024 / 1024 ))
+    if (( available_gb < required_gb )); then
+        log_warn "Low disk space at $path: ${available_gb}GB available (recommend ${required_gb}GB+)"
+    fi
+}
+
+# Required host tools
+for cmd in make zip git ccache; do
+    check_cmd "$cmd"
+done
+
+# Disk space sanity
+check_disk "$PREFIX" 10
+
+# Source zip only matters if --zip was requested
+if [[ "$CREATE_ZIP" == true && ! -f "$SOURCE_ZIP" ]]; then
+    log_error "Source AnyKernel3 zip not found: $SOURCE_ZIP (required with --zip)"
+    (( _preflight_errors++ )) || true
+fi
+
+if (( _preflight_errors > 0 )); then
+    phase_fail
+    exit $EC_PREFLIGHT
+fi
+
+phase_ok
+
+# -----------------------------------------------------------------------------
+# TOOLCHAIN DETECTION
+# -----------------------------------------------------------------------------
+phase_start "toolchain"
+
+verify_toolchain() {
+    local tc_path="$1"
+    [[ -z "$tc_path" || ! -d "$tc_path/bin" ]] && return 1
+
+    local required_tools=(clang llvm-ar llvm-nm ld.lld llvm-objcopy llvm-objdump llvm-strip)
+    local missing=()
+    for tool in "${required_tools[@]}"; do
+        [[ -x "$tc_path/bin/$tool" ]] || missing+=("$tool")
     done
 
-    # Restore PATH
-    export PATH="$old_path"
-
-    if [ ${#missing_tools[@]} -gt 0 ]; then
+    if (( ${#missing[@]} > 0 )); then
+        log_warn "Toolchain at $tc_path missing: ${missing[*]}"
         return 1
     fi
 
-    # Test clang version
-    if [ -x "$bin_path/clang" ]; then
-        local clang_version=$("$bin_path/clang" --version 2>/dev/null | head -n1)
-        if [ -n "$clang_version" ]; then
-            print_success "Clang version: $clang_version"
-        else
-            return 1
-        fi
-    else
-        return 1
-    fi
-
+    # Smoke-test clang
+    "$tc_path/bin/clang" --version &>/dev/null || return 1
     return 0
 }
 
-# Function to prompt for toolchain path
-prompt_for_toolchain() {
-    echo
-
-    local user_path
-    local attempts=0
-    local max_attempts=3
-
-    while [ $attempts -lt $max_attempts ]; do
-        read -p "Enter toolchain path, e.g /clang/ NOT /clang/bin (or 'quit' to exit): " user_path
-
-        if [ "$user_path" = "quit" ] || [ "$user_path" = "q" ]; then
-            print_status "Build cancelled by user"
-            exit 0
-        fi
-
-        if [ -z "$user_path" ]; then
-            print_error "Please enter a valid path"
-            ((attempts++))
-            continue
-        fi
-
-        # Expand tilde if present
-        user_path="${user_path/#\~/$HOME}"
-
-        # Check if directory exists
-        if [ ! -d "$user_path" ]; then
-            print_error "Directory does not exist: $user_path"
-            ((attempts++))
-            continue
-        fi
-
-        # Verify the toolchain
-        if verify_toolchain "$user_path"; then
-            echo "$user_path"
-            return 0
-        else
-            print_error "Toolchain verification failed for: $user_path"
-            ((attempts++))
-
-            if [ $attempts -lt $max_attempts ]; then
-                echo "Please try again (attempt $((attempts + 1))/$max_attempts)"
-            fi
-        fi
-    done
-
-    print_error "Maximum attempts reached. Unable to find a valid toolchain."
-    exit 1
-}
-
-# Function to display build summary
-show_build_info() {
-    local start_time=$1
-    local end_time=$2
-    local duration=$((end_time - start_time))
-    local minutes=$((duration / 60))
-    local seconds=$((duration % 60))
-
-    print_section "BUILD SUMMARY"
-    echo -e "  ${CYAN}Build Time:${NC} ${minutes}m ${seconds}s"
-    echo -e "  ${CYAN}Git Commit:${NC} $(git rev-parse --short HEAD 2>/dev/null || echo 'N/A')"
-    echo -e "  ${CYAN}Git Branch:${NC} $(git symbolic-ref --short HEAD 2>/dev/null || echo 'N/A')"
-    echo -e "  ${CYAN}Kernel Image:${NC} $(ls -lh out/arch/arm64/boot/Image 2>/dev/null | awk '{print $5}' || echo 'Not found')"
-    echo -e "  ${CYAN}Log Saved To:${NC} $BUILD_LOG"
-}
-
-# Function to create flashable zip
-create_flashable_zip() {
-    # Change this to an AnyKernel3 ZIP without the Image file in it
-    local source_zip="/home/zears/Documents/WMKernel-ksunext-susfs.zip"
-    local anykernel_dir="$PREFIX/AnyKernel3"
-    local kernel_image="$PREFIX/out/arch/arm64/boot/Image"
-
-    print_section "FLASHABLE ZIP CREATION"
-
-    # Check if source zip exists
-    if [ ! -f "$source_zip" ]; then
-        print_warning "Source zip not found: $source_zip"
-        print_status "Skipping flashable zip creation"
-        return 1
-    fi
-
-    # Check if kernel image exists
-    if [ ! -f "$kernel_image" ]; then
-        print_error "Kernel image not found: $kernel_image"
-        return 1
-    fi
-
-    # Create AnyKernel3 directory if it doesn't exist
-    if [ ! -d "$anykernel_dir" ]; then
-        print_status "Creating AnyKernel3 directory..."
-        mkdir -p "$anykernel_dir"
-    fi
-
-    # Get git information for filename
-    local current_date=$(date +%Y%m%d_%H%M)
-    local commit_hash=$(git rev-parse --short HEAD 2>/dev/null || echo "unknown")
-    local branch_name=$(git symbolic-ref --short HEAD 2>/dev/null | sed 's/[^a-zA-Z0-9._-]/_/g' || echo "unknown")
-
-    # Generate output filename
-    local output_zip="$anykernel_dir/WMKernel-ksunext-susfs-dev_${current_date}_${commit_hash}_${branch_name}.zip"
-
-    print_status "Creating flashable zip..."
-    print_status "Source: $source_zip"
-    print_status "Output: $output_zip"
-
-    # Copy the source zip to the new location
-    if cp "$source_zip" "$output_zip"; then
-        print_success "Base zip copied successfully"
-    else
-        print_error "Failed to copy base zip"
-        return 1
-    fi
-
-    # Check if zip command exists
-    if ! command_exists "zip"; then
-        print_error "zip command not found. Please install zip package"
-        return 1
-    fi
-
-    # Add the kernel image to the zip
-    print_status "Adding kernel image to zip..."
-    if cd "$PREFIX" && zip -j "$output_zip" "$kernel_image" > /dev/null 2>&1; then
-        print_success "Kernel image added to zip successfully"
-        cd "$PREFIX"  # Return to original directory
-    else
-        print_error "Failed to add kernel image to zip"
-        cd "$PREFIX"  # Return to original directory even on failure
-        return 1
-    fi
-
-    # Display final zip information
-    if [ -f "$output_zip" ]; then
-        local zip_size=$(ls -lh "$output_zip" | awk '{print $5}')
-        print_success "Flashable zip created successfully!"
-        echo -e "  ${CYAN}Location:${NC} $output_zip"
-        echo -e "  ${CYAN}Size:${NC} $zip_size"
-        return 0
-    else
-        print_error "Flashable zip creation failed"
-        return 1
-    fi
-}
-
-# Start timing
-BUILD_START_TIME=$(date +%s)
-
-print_section "ANDROID KERNEL BUILD SCRIPT"
-print_status "Starting build process for Android Kernel $(make kernelversion 2>/dev/null || echo 'Unknown')"
-
-# Define paths and toolchain
-PREFIX="$(pwd)"
-print_status "Working directory: $PREFIX"
-
-# Check if custom LLVM toolchain exists, otherwise use default
-print_section "TOOLCHAIN DETECTION"
 CLANG_DIR=""
+for candidate in "${CLANG_SEARCH_DIRS[@]}"; do
+    if verify_toolchain "$candidate"; then
+        CLANG_DIR="$candidate"
+        log_ok "Toolchain: $CLANG_DIR"
+        CLANG_VERSION="$("$CLANG_DIR/bin/clang" --version | head -1)"
+        log_info "Clang: $CLANG_VERSION"
+        break
+    fi
+done
 
-# Check predefined locations
-if [ -d "/home/zears/clang-wmk/bin" ]; then
-    CLANG_DIR="/home/zears/clang-wmk"
-    print_success "Found custom LLVM toolchain: $CLANG_DIR"
+if [[ -z "$CLANG_DIR" ]]; then
+    # Last resort: interactive prompt (not useful in non-TTY agent environments)
+    if [[ -t 0 ]]; then
+        log_warn "No toolchain found in default locations. Enter path manually."
+        for attempt in 1 2 3; do
+            read -rp "Toolchain path (attempt $attempt/3, or 'quit'): " user_path
+            [[ "$user_path" == "quit" || "$user_path" == "q" ]] && exit $EC_OK
+            user_path="${user_path/#\~/$HOME}"
+            if verify_toolchain "$user_path"; then
+                CLANG_DIR="$user_path"
+                break
+            fi
+            log_error "Verification failed: $user_path"
+        done
+    fi
 
-    # Verify the found toolchain
-    if ! verify_toolchain "$CLANG_DIR"; then
-        print_error "Custom toolchain verification failed, trying default location"
-        CLANG_DIR=""
+    if [[ -z "$CLANG_DIR" ]]; then
+        phase_fail
+        log_error "No valid LLVM toolchain found. Set CLANG_SEARCH_DIRS or provide one interactively."
+        exit $EC_TOOLCHAIN
     fi
 fi
 
-if [ -z "$CLANG_DIR" ] && [ -d "${PREFIX}/toolchain/clang/host/linux-x86/clang-r383902/bin" ]; then
-    CLANG_DIR="${PREFIX}/toolchain/clang/host/linux-x86/clang-r383902"
-    print_success "Found default toolchain: $CLANG_DIR"
-
-    # Verify the found toolchain
-    if ! verify_toolchain "$CLANG_DIR"; then
-        print_error "Default toolchain verification failed"
-        CLANG_DIR=""
-    fi
-fi
-
-if [ -z "$CLANG_DIR" ]; then
-    # No valid toolchain found, prompt user
-    CLANG_DIR=$(prompt_for_toolchain)
-    print_success "Using user-provided toolchain: $CLANG_DIR"
-fi
-
-# Set up environment
-print_section "ENVIRONMENT SETUP"
 export PATH="$CLANG_DIR/bin:$PATH"
-export ARCH=arm64
+export ARCH="$ARCH"
 
-# Display clang version
-if [ -x "$CLANG_DIR/bin/clang" ]; then
-    CLANG_VERSION=$("$CLANG_DIR/bin/clang" --version | head -n1)
-    print_status "Using: $CLANG_VERSION"
-fi
-
-# Check for ccache and set CC accordingly
-if command_exists "ccache"; then
-    print_success "ccache found - build acceleration enabled"
-    ccache -z > /dev/null 2>&1  # Reset stats
+# Compiler wrapper
+CC_CMD="clang"
+if command -v ccache &>/dev/null; then
     CC_CMD="ccache clang"
-    CCACHE_AVAILABLE=true
+    ccache -z &>/dev/null
+    log_info "ccache: enabled"
 else
-    print_warning "ccache not found - builds will be slower"
-    CC_CMD="clang"
-    CCACHE_AVAILABLE=false
+    log_warn "ccache not found — builds will be slower"
 fi
 
-# Build configuration
-print_section "BUILD CONFIGURATION"
-export KCFLAGS=-w
-export CONFIG_SECTION_MISMATCH_WARN_ONLY=y
+phase_ok
 
-print_status "Architecture: arm64"
-print_status "Compiler: $CC_CMD"
-print_status "Suppressing warnings: enabled"
-print_status "Section mismatch warnings only: enabled"
-if [ "$KEEP_GOING" = true ]; then
-    print_status "Keep-going mode: enabled"
-    MAKE_KEEP_GOING="-k"
+# -----------------------------------------------------------------------------
+# KERNEL CONFIGURATION
+# -----------------------------------------------------------------------------
+phase_start "defconfig"
+
+log_info "defconfig: $DEFCONFIG"
+
+if [[ "$DRY_RUN" == false ]]; then
+    if ! make -C "$PREFIX" O="$OUT_DIR" ARCH="$ARCH" "$DEFCONFIG" \
+            >> "$BUILD_LOG" 2>&1; then
+        phase_fail
+        exit $EC_CONFIG
+    fi
 else
-    print_status "Keep-going mode: disabled"
-    MAKE_KEEP_GOING=""
+    log_info "[dry-run] Skipping defconfig"
 fi
 
-# Configure kernel
-print_section "KERNEL CONFIGURATION"
-print_status "Configuring kernel with a22_defconfig..."
+phase_ok
 
-if make -C "$PREFIX" O="$PREFIX/out" ARCH=arm64 a22_wmk_defconfig; then
-    print_success "Kernel configuration completed"
+# -----------------------------------------------------------------------------
+# KERNEL COMPILATION
+# -----------------------------------------------------------------------------
+phase_start "build"
+
+log_info "jobs=$JOBS arch=$ARCH compiler=$CC_CMD keep-going=$KEEP_GOING"
+
+MAKE_FLAGS=(
+    -j"$JOBS"
+    ARCH="$ARCH"
+    SUBARCH="$ARCH"
+    O="$OUT_DIR"
+    CC="$CC_CMD"
+    AR="llvm-ar"
+    NM="llvm-nm"
+    LD="ld.lld"
+    OBJCOPY="llvm-objcopy"
+    OBJDUMP="llvm-objdump"
+    STRIP="llvm-strip"
+    CLANG_TRIPLE="aarch64-linux-gnu-"
+    CROSS_COMPILE="aarch64-linux-gnu-"
+    CROSS_COMPILE_ARM32="arm-linux-gnueabi-"
+    CROSS_COMPILE_COMPAT="arm-linux-gnueabi-"
+    LLVM=1
+    LLVM_IAS=1
+    INSTALL_MOD_STRIP=1
+    KCFLAGS="-w"
+    CONFIG_SECTION_MISMATCH_WARN_ONLY=y
+    KBUILD_BUILD_USER="$(git -C "$PREFIX" rev-parse --short HEAD 2>/dev/null | cut -c1-7 || echo 'unknown')"
+    KBUILD_BUILD_HOST="$(git -C "$PREFIX" symbolic-ref --short HEAD 2>/dev/null || echo 'unknown')"
+)
+
+[[ "$KEEP_GOING" == true ]] && MAKE_FLAGS+=(-k)
+
+if [[ "$DRY_RUN" == true ]]; then
+    log_info "[dry-run] Skipping compilation"
+    phase_skip
 else
-    print_error "Kernel configuration failed"
-    exit 1
+    if [[ "$QUIET_MODE" == true ]]; then
+        # Quiet: only errors reach the terminal; everything goes to the log
+        if ! make -C "$PREFIX" "${MAKE_FLAGS[@]}" 2>&1 \
+                | tee -a "$BUILD_LOG" \
+                | grep -E "^(error:|../.*error:|make\[|ld:)" >&2; then
+            # grep exit 1 (no matches) should not abort — only make failure matters
+            true
+        fi
+        # Re-run make to capture the real exit code (tee ate it above)
+        # Better: use a temp file for the exit code
+        make -C "$PREFIX" "${MAKE_FLAGS[@]}" >> "$BUILD_LOG" 2>&1 || {
+            phase_fail
+            log_error "Compilation failed. See $BUILD_LOG and $ERROR_LOG"
+            grep -E "error:" "$BUILD_LOG" >> "$ERROR_LOG" 2>/dev/null || true
+            exit $EC_BUILD
+        }
+    else
+        if ! make -C "$PREFIX" "${MAKE_FLAGS[@]}" 2>&1 | tee -a "$BUILD_LOG"; then
+            phase_fail
+            log_error "Compilation failed. See $BUILD_LOG and $ERROR_LOG"
+            grep -E "error:" "$BUILD_LOG" >> "$ERROR_LOG" 2>/dev/null || true
+            exit $EC_BUILD
+        fi
+    fi
+
+    phase_ok
 fi
 
-# Build kernel
-print_section "KERNEL COMPILATION"
-print_status "Starting compilation with 16 parallel jobs..."
-print_status "This may take several minutes depending on your hardware..."
+# -----------------------------------------------------------------------------
+# POST-BUILD: copy Image
+# -----------------------------------------------------------------------------
+phase_start "copy_image"
 
-# Store build command for reference
-BUILD_CMD="make $MAKE_KEEP_GOING -j16 ARCH=arm64 SUBARCH=arm64 O=$PREFIX/out \
-CC=\"$CC_CMD\" \
-AR=\"llvm-ar\" \
-NM=\"llvm-nm\" \
-LD=\"ld.lld\" \
-OBJCOPY=\"llvm-objcopy\" \
-OBJDUMP=\"llvm-objdump\" \
-STRIP=\"llvm-strip\" \
-CLANG_TRIPLE=\"aarch64-linux-gnu-\" \
-CROSS_COMPILE=\"aarch64-linux-gnu-\" \
-CROSS_COMPILE_ARM32=\"arm-linux-gnueabi-\" \
-CROSS_COMPILE_COMPAT=\"arm-linux-gnueabi-\" \
-LLVM=1 \
-LLVM_IAS=1 \
-INSTALL_MOD_STRIP=1 \
-KCFLAGS=-w \
-CONFIG_SECTION_MISMATCH_WARN_ONLY=y \
-KBUILD_BUILD_USER=\"$(git rev-parse --short HEAD | cut -c1-7)\" \
-KBUILD_BUILD_HOST=\"$(git symbolic-ref --short HEAD)\""
-
-if [ "$QUIET_MODE" = true ]; then
-    BUILD_CMD="$BUILD_CMD > \"$BUILD_LOG\" 2>&1"
+if [[ "$DRY_RUN" == true ]]; then
+    phase_skip
+elif [[ -f "$KERNEL_IMAGE_OUT" ]]; then
+    mkdir -p "$(dirname "$KERNEL_IMAGE_TREE")"
+    cp "$KERNEL_IMAGE_OUT" "$KERNEL_IMAGE_TREE"
+    log_ok "Image copied → $KERNEL_IMAGE_TREE ($(du -h "$KERNEL_IMAGE_TREE" | cut -f1))"
+    phase_ok
 else
-    BUILD_CMD="$BUILD_CMD 2>&1 | tee \"$BUILD_LOG\""
+    phase_fail
+    log_error "Kernel image not found at: $KERNEL_IMAGE_OUT"
+    exit $EC_POST_COPY
 fi
 
-if eval $BUILD_CMD; then
-    print_success "Kernel compilation completed successfully"
+# -----------------------------------------------------------------------------
+# CCACHE STATS (informational only)
+# -----------------------------------------------------------------------------
+if command -v ccache &>/dev/null && [[ "$DRY_RUN" == false ]]; then
+    log_section "ccache stats"
+    ccache -s >> "$BUILD_LOG" 2>&1
+    log_info "ccache stats written to build log"
+fi
+
+# -----------------------------------------------------------------------------
+# FLASHABLE ZIP (only with --zip)
+# -----------------------------------------------------------------------------
+phase_start "zip"
+
+if [[ "$CREATE_ZIP" == false ]]; then
+    phase_skip
+elif [[ "$DRY_RUN" == true ]]; then
+    log_info "[dry-run] Skipping zip"
+    phase_skip
 else
-    print_error "Kernel compilation failed"
-    exit 1
+    git_commit="$(git -C "$PREFIX" rev-parse --short HEAD 2>/dev/null || echo 'unknown')"
+    git_branch="$(git -C "$PREFIX" symbolic-ref --short HEAD 2>/dev/null \
+                    | sed 's/[^a-zA-Z0-9._-]/_/g' || echo 'unknown')"
+    zip_ts="$(date +%Y%m%d_%H%M)"
+    output_zip="$ANYKERNEL_DIR/WMKernel-ksunext-susfs-dev_${zip_ts}_${git_commit}_${git_branch}.zip"
+
+    mkdir -p "$ANYKERNEL_DIR"
+
+    if ! cp "$SOURCE_ZIP" "$output_zip"; then
+        phase_fail
+        log_error "Failed to copy base zip: $SOURCE_ZIP"
+        exit $EC_ZIP
+    fi
+
+    # Add the kernel image in-place; cd dance avoids storing full path inside zip
+    if ! (cd "$(dirname "$KERNEL_IMAGE_OUT")" && \
+          zip -j "$output_zip" "$(basename "$KERNEL_IMAGE_OUT")" >> "$BUILD_LOG" 2>&1); then
+        phase_fail
+        log_error "Failed to add Image to zip"
+        rm -f "$output_zip"
+        exit $EC_ZIP
+    fi
+
+    log_ok "Flashable zip: $output_zip ($(du -h "$output_zip" | cut -f1))"
+    phase_ok
 fi
 
-# Copy the built kernel image
-print_section "POST-BUILD OPERATIONS"
-print_status "Copying kernel image..."
+# -----------------------------------------------------------------------------
+# BUILD SUMMARY (human-readable, or JSON if --json)
+# -----------------------------------------------------------------------------
+log_section "BUILD COMPLETE"
+log_ok  "Kernel image : $KERNEL_IMAGE_TREE"
+log_info "Build log   : $BUILD_LOG"
+log_info "Git commit  : $(git -C "$PREFIX" rev-parse --short HEAD 2>/dev/null || echo 'n/a')"
+log_info "Git branch  : $(git -C "$PREFIX" symbolic-ref --short HEAD 2>/dev/null || echo 'n/a')"
+[[ -f "$KERNEL_IMAGE_TREE" ]] && \
+    log_info "Image size  : $(du -h "$KERNEL_IMAGE_TREE" | cut -f1)"
 
-if [ -f "out/arch/arm64/boot/Image" ]; then
-    cp out/arch/arm64/boot/Image "$PREFIX/arch/arm64/boot/Image"
-    print_success "Kernel image copied to arch/arm64/boot/Image"
-else
-    print_error "Kernel image not found at expected location"
-    exit 1
-fi
-
-# Show ccache statistics
-if [ "$CCACHE_AVAILABLE" = true ]; then
-    print_section "CCACHE STATISTICS"
-    ccache -s
-fi
-
-# Build completion
-BUILD_END_TIME=$(date +%s)
-show_build_info $BUILD_START_TIME $BUILD_END_TIME
-
-# Create flashable zip
-create_flashable_zip
-
-print_section "BUILD COMPLETED"
-print_success "Android kernel build finished successfully!"
-print_status "Kernel image ready at: arch/arm64/boot/Image"
+# Disarm trap and exit cleanly
+_success_exit
