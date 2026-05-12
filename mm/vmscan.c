@@ -6158,7 +6158,7 @@ static void lru_gen_age_node(struct pglist_data *pgdat, struct scan_control *sc)
 
 	memcg = mem_cgroup_iter(NULL, NULL, NULL);
 	do {
-		struct lruvec *lruvec = mem_cgroup_lruvec(memcg, pgdat);
+		struct lruvec *lruvec = mem_cgroup_lruvec(pgdat, memcg);
 
 		if (age_lruvec(lruvec, sc, min_ttl))
 			success = true;
@@ -6209,7 +6209,7 @@ void lru_gen_look_around(struct page_vma_mapped_walk *pvmw)
 	bool can_swap = !page_is_file_lru(page);
 	struct mem_cgroup *memcg = page_memcg(page);
 	struct pglist_data *pgdat = page_pgdat(page);
-	struct lruvec *lruvec = mem_cgroup_lruvec(memcg, pgdat);
+	struct lruvec *lruvec = mem_cgroup_lruvec(pgdat, memcg);
 	DEFINE_MAX_SEQ(lruvec);
 	int old_gen, new_gen = lru_gen_from_seq(max_seq);
 
