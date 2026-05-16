@@ -3231,6 +3231,13 @@ static bool shrink_node(pg_data_t *pgdat, struct scan_control *sc)
 			unsigned long reclaimed;
 			unsigned long scanned;
 
+			/*
+			 * This loop can become CPU-bound when target memcgs
+			 * aren't eligible for reclaim. Avoid soft lockups
+			 * and long non-preemptible reclaim stretches.
+			 */
+			cond_resched();
+
 			if (mem_cgroup_low(root, memcg)) {
 				if (!sc->memcg_low_reclaim) {
 					sc->memcg_low_skipped = 1;
