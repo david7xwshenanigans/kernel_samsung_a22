@@ -2974,12 +2974,16 @@ static void shrink_node_memcg(struct pglist_data *pgdat, struct mem_cgroup *memc
 {
 	struct lruvec *lruvec = mem_cgroup_lruvec(pgdat, memcg);
 
-    /* MGLRU: use generational eviction when enabled */
-    if (lru_gen_enabled() && lruvec->lrugen.enabled) {
-        lru_gen_shrink_lruvec(lruvec, sc);
-        *lru_pages = 0;
-        return;
-    }
+	if (lru_gen_enabled() && lruvec->lrugen.enabled) {
+		enum lru_list lru;
+
+		*lru_pages = 0;
+		for_each_evictable_lru(lru)
+			*lru_pages += lruvec_lru_size(lruvec, lru, sc->reclaim_idx);
+
+		lru_gen_shrink_lruvec(lruvec, sc);
+		return;
+	}
 
 	unsigned long nr[NR_LRU_LISTS];
 	unsigned long targets[NR_LRU_LISTS];
@@ -6629,6 +6633,7 @@ static int evict_pages(struct lruvec *lruvec, struct scan_control *sc, int swapp
 	spin_lock_irq(&pgdat->lru_lock);
 
 	scanned = isolate_pages(lruvec, sc, swappiness, &type, &list);
+	sc->nr_scanned += scanned;
 
 	scanned += try_to_inc_min_seq(lruvec, swappiness);
 
