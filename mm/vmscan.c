@@ -208,6 +208,12 @@ struct scan_control {
 	struct vm_area_struct *target_vma;
 };
 
+#ifdef CONFIG_LRU_GEN
+/* forward declarations — definitions are later in this file */
+static void lru_gen_age_node(struct pglist_data *pgdat, struct scan_control *sc);
+static void lru_gen_shrink_lruvec(struct lruvec *lruvec, struct scan_control *sc);
+#endif
+
 #ifdef ARCH_HAS_PREFETCH
 #define prefetch_prev_lru_page(_page, _base, _field)			\
 	do {								\
@@ -2967,6 +2973,14 @@ static void shrink_node_memcg(struct pglist_data *pgdat, struct mem_cgroup *memc
 			      struct scan_control *sc, unsigned long *lru_pages)
 {
 	struct lruvec *lruvec = mem_cgroup_lruvec(pgdat, memcg);
+
+    /* MGLRU: use generational eviction when enabled */
+    if (lru_gen_enabled() && lruvec->lrugen.enabled) {
+        lru_gen_shrink_lruvec(lruvec, sc);
+        *lru_pages = 0;
+        return;
+    }
+
 	unsigned long nr[NR_LRU_LISTS];
 	unsigned long targets[NR_LRU_LISTS];
 	unsigned long nr_to_scan;
@@ -4030,7 +4044,10 @@ static int balance_pgdat(pg_data_t *pgdat, int order, int classzone_idx)
 		 * pages are rotated regardless of classzone as this is
 		 * about consistent aging.
 		 */
-		age_active_anon(pgdat, &sc);
+		if (lru_gen_enabled())
+		    lru_gen_age_node(pgdat, &sc);
+		else
+		    age_active_anon(pgdat, &sc);
 
 		/*
 		 * If we're getting trouble reclaiming, start doing writepage
