@@ -68,23 +68,26 @@ struct mem_cgroup_reclaim_cookie {
 #define MEM_CGROUP_ID_SHIFT	16
 #define MEM_CGROUP_ID_MAX	USHRT_MAX
 
+bool mem_cgroup_low(struct mem_cgroup *root, struct mem_cgroup *memcg);
 
-/* VENDOR FIX: MGLRU uses 5.10+ memcg protection API absent in this 4.14 tree.
- * memory.min was added in 4.18, calculate_protection in 5.7.
- * Stub all three so MGLRU proceeds with normal reclaim for all memcgs. */
+/*
+ * This tree has memory.low but not memory.min or the later effective
+ * protection accounting. Keep memory.low enforcement for MGLRU and treat
+ * memory.min as unsupported on 4.14.
+ */
 static inline void mem_cgroup_calculate_protection(struct mem_cgroup *root,
-                                                   struct mem_cgroup *memcg)
+						   struct mem_cgroup *memcg)
 {
 }
 
 static inline bool mem_cgroup_below_min(struct mem_cgroup *memcg)
 {
-    return false;
+	return false;
 }
 
 static inline bool mem_cgroup_below_low(struct mem_cgroup *memcg)
 {
-    return false;
+	return mem_cgroup_low(NULL, memcg);
 }
 
 struct mem_cgroup_id {
