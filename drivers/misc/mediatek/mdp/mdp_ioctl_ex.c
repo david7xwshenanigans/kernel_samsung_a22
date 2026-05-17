@@ -1037,7 +1037,12 @@ s32 mdp_ioctl_alloc_readback_slots(void *fp, unsigned long param)
 	if (rb_slot[alloc_slot_index].ref_cnt) {
 		CMDQ_ERR("%s alloc slot which is being used, slot id: %d\n",
 			__func__, alloc_slot_index);
+		/* VENDOR FIX: roll back slot state on late allocation failure. */
+		alloc_slot[free_slot_group] &= ~(1LL << free_slot);
+		if (alloc_slot[free_slot_group] != ~0UL)
+			alloc_slot_group &= ~(1LL << free_slot_group);
 		mutex_unlock(&rb_slot_list_mutex);
+		cmdq_free_write_addr(paStart, CMDQ_CLT_MDP);
 		return -ENOMEM;
 	}
 	rb_slot[alloc_slot_index].count = rb_req.count;
@@ -1054,6 +1059,16 @@ s32 mdp_ioctl_alloc_readback_slots(void *fp, unsigned long param)
 
 	if (copy_to_user((void *)param, &rb_req, sizeof(rb_req))) {
 		CMDQ_ERR("%s copy_to_user failed\n", __func__);
+		mutex_lock(&rb_slot_list_mutex);
+		/* VENDOR FIX: release the reserved slot when userspace copyout fails. */
+		alloc_slot[free_slot_group] &= ~(1LL << free_slot);
+		if (alloc_slot[free_slot_group] != ~0UL)
+			alloc_slot_group &= ~(1LL << free_slot_group);
+		rb_slot[alloc_slot_index].count = 0;
+		rb_slot[alloc_slot_index].pa_start = 0;
+		rb_slot[alloc_slot_index].fp = NULL;
+		mutex_unlock(&rb_slot_list_mutex);
+		cmdq_free_write_addr(paStart, CMDQ_CLT_MDP);
 		return -EFAULT;
 	}
 
