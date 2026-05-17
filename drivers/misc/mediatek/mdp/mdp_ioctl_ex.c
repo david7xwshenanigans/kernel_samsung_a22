@@ -189,6 +189,86 @@ static dma_addr_t translate_read_id(u32 read_id)
 		+ slot_offset * sizeof(u32);
 }
 
+static void mdp_release_mapping_job_handles(struct mdp_job_mapping *mapping_job)
+{
+	u32 i;
+
+	if (!mapping_job)
+		return;
+
+	for (i = 0; i < mapping_job->handle_count; i++) {
+		if (!mapping_job->handles[i])
+			continue;
+
+		mdp_ion_free_handle(mapping_job->handles[i]);
+		mapping_job->handles[i] = NULL;
+	}
+
+	mapping_job->handle_count = 0;
+}
+
+static void mdp_release_readback_slots(struct cmdqRecStruct *handle)
+{
+	u32 i;
+
+	if (!handle)
+		return;
+
+	mutex_lock(&rb_slot_list_mutex);
+	for (i = 0; i < ARRAY_SIZE(handle->slot_ids); i++) {
+		s32 slot_id = handle->slot_ids[i];
+
+		if (slot_id < 0)
+			continue;
+
+		if (unlikely(slot_id >= MAX_RB_SLOT_NUM)) {
+			handle->slot_ids[i] = -1;
+			continue;
+		}
+
+		if (rb_slot[slot_id].ref_cnt) {
+			CMDQ_MSG("slot id %d, count-- by release > %d\n",
+				slot_id, rb_slot[slot_id].ref_cnt - 1);
+			rb_slot[slot_id].ref_cnt--;
+		}
+
+		handle->slot_ids[i] = -1;
+	}
+	mutex_unlock(&rb_slot_list_mutex);
+}
+
+static void mdp_release_mapping_job_async(u64 user_data)
+{
+	struct mdp_job_mapping *mapping_job =
+		(struct mdp_job_mapping *)(unsigned long)user_data;
+
+	if (!mapping_job)
+		return;
+
+	mdp_release_readback_slots(mapping_job->job);
+	mdp_release_mapping_job_handles(mapping_job);
+	kfree(mapping_job);
+}
+
+static bool mdp_arm_mapping_job_release(struct mdp_job_mapping *mapping_job)
+{
+	struct cmdqRecStruct *handle;
+
+	if (!mapping_job)
+		return false;
+
+	handle = mapping_job->job;
+	if (!handle || handle->thread == CMDQ_INVALID_THREAD) {
+		mdp_release_readback_slots(handle);
+		return false;
+	}
+
+	/* VENDOR FIX: retire readback-slot refs and ION handles with the task. */
+	handle->async_callback = mdp_release_mapping_job_async;
+	handle->async_user_data = (u64)(unsigned long)mapping_job;
+	return true;
+}
+
 static s32 mdp_process_read_request(struct mdp_read_readback *req_user)
 {
 	/* create kernel-space buffer for working */
@@ -470,8 +550,8 @@ static s32 translate_user_job(struct mdp_submit *user_job,
 		copy_size = copy_count * sizeof(struct op_meta);
 		if (copy_from_user(metas, cur_src, copy_size)) {
 			CMDQ_ERR("copy metas from user fail:%u\n", copy_size);
-			kfree(metas);
-			return -EINVAL;
+			status = -EINVAL;
+			goto out_release_slots;
 		}
 
 		for (i = 0; i < copy_count; i++) {
@@ -501,8 +581,8 @@ static s32 translate_user_job(struct mdp_submit *user_job,
 					CMDQ_ERR("readback slot [%d] reach maximum ref_cnt\n",
 						slot_id);
 					mutex_unlock(&rb_slot_list_mutex);
-					kfree(metas);
-					return -EINVAL;
+					status = -EINVAL;
+					goto out_release_slots;
 				}
 				for (j = 0; j < ARRAY_SIZE(handle->slot_ids); j++) {
 					if (slot_id == handle->slot_ids[j])
@@ -523,6 +603,11 @@ static s32 translate_user_job(struct mdp_submit *user_job,
 	}
 
 	kfree(metas);
+	return status;
+
+out_release_slots:
+	kfree(metas);
+	mdp_release_readback_slots(handle);
 	return status;
 }
 
@@ -698,6 +783,7 @@ s32 mdp_ioctl_async_exec(struct file *pf, unsigned long param)
 
 	if (copy_from_user(&user_job, (void *)param, sizeof(user_job))) {
 		CMDQ_ERR("copy mdp_submit from user fail\n");
+		mdp_release_mapping_job_handles(mapping_job);
 		kfree(mapping_job);
 		status = -EFAULT;
 		goto done;
@@ -710,6 +796,7 @@ s32 mdp_ioctl_async_exec(struct file *pf, unsigned long param)
 		CMDQ_ERR("invalid read count:%u meta count:%u prop size:%u\n",
 			user_job.read_count_v1,
 			user_job.meta_count, user_job.prop_size);
+		mdp_release_mapping_job_handles(mapping_job);
 		kfree(mapping_job);
 		status = -EINVAL;
 		goto done;
@@ -718,6 +805,7 @@ s32 mdp_ioctl_async_exec(struct file *pf, unsigned long param)
 	cmd_buf.va_base = kmalloc(PAGE_SIZE, GFP_KERNEL);
 	if (!cmd_buf.va_base) {
 		CMDQ_ERR("%s allocate cmd_buf fail!\n", __func__);
+		mdp_release_mapping_job_handles(mapping_job);
 		kfree(mapping_job);
 		status = -ENOMEM;
 		goto done;
@@ -726,6 +814,7 @@ s32 mdp_ioctl_async_exec(struct file *pf, unsigned long param)
 
 	status = cmdq_mdp_handle_create(&handle);
 	if (status < 0) {
+		mdp_release_mapping_job_handles(mapping_job);
 		kfree(mapping_job);
 		kfree(cmd_buf.va_base);
 		goto done;
@@ -736,6 +825,7 @@ s32 mdp_ioctl_async_exec(struct file *pf, unsigned long param)
 	if (status < 0) {
 		CMDQ_ERR("%s setup fail:%d\n", __func__, status);
 		cmdq_task_destroy(handle);
+		mdp_release_mapping_job_handles(mapping_job);
 		kfree(mapping_job);
 		kfree(cmd_buf.va_base);
 		goto done;
@@ -759,6 +849,7 @@ s32 mdp_ioctl_async_exec(struct file *pf, unsigned long param)
 	if (!user_job.secData.is_secure && hal_in_tui()) {
 		CMDQ_ERR("%s normal task conflict with TUI", __func__);
 		cmdq_task_destroy(handle);
+		mdp_release_mapping_job_handles(mapping_job);
 		kfree(mapping_job);
 		kfree(cmd_buf.va_base);
 		status = -EFAULT;
@@ -772,6 +863,7 @@ s32 mdp_ioctl_async_exec(struct file *pf, unsigned long param)
 	if (status < 0) {
 		CMDQ_ERR("%s config sec fail:%d\n", __func__, status);
 		cmdq_task_destroy(handle);
+		mdp_release_mapping_job_handles(mapping_job);
 		kfree(mapping_job);
 		kfree(cmd_buf.va_base);
 		goto done;
@@ -789,6 +881,7 @@ s32 mdp_ioctl_async_exec(struct file *pf, unsigned long param)
 	if (status < 0) {
 		CMDQ_ERR("%s translate fail:%d\n", __func__, status);
 		cmdq_task_destroy(handle);
+		mdp_release_mapping_job_handles(mapping_job);
 		kfree(mapping_job);
 		kfree(cmd_buf.va_base);
 		goto done;
@@ -797,14 +890,18 @@ s32 mdp_ioctl_async_exec(struct file *pf, unsigned long param)
 	status = mdp_implement_read_v1(&user_job, handle, &cmd_buf);
 	if (status < 0) {
 		CMDQ_ERR("%s read_v1 fail:%d\n", __func__, status);
+		mdp_release_readback_slots(handle);
 		cmdq_task_destroy(handle);
+		mdp_release_mapping_job_handles(mapping_job);
 		kfree(mapping_job);
 		kfree(cmd_buf.va_base);
 		goto done;
 	}
 
 	if (cmdq_handle_flush_cmd_buf(handle, &cmd_buf)) {
+		mdp_release_readback_slots(handle);
 		cmdq_task_destroy(handle);
+		mdp_release_mapping_job_handles(mapping_job);
 		kfree(mapping_job);
 		kfree(cmd_buf.va_base);
 		status = -EFAULT;
@@ -822,28 +919,41 @@ s32 mdp_ioctl_async_exec(struct file *pf, unsigned long param)
 		if (handle->thread != CMDQ_INVALID_THREAD)
 			cmdq_mdp_unlock_thread(handle);
 #endif
+		mdp_release_readback_slots(handle);
 		cmdq_task_destroy(handle);
+		mdp_release_mapping_job_handles(mapping_job);
 		kfree(mapping_job);
 		goto done;
 	}
 
-	INIT_LIST_HEAD(&mapping_job->list_entry);
 	mutex_lock(&mdp_job_mapping_list_mutex);
 	if (job_mapping_idx == 0)
 		job_mapping_idx = 1;
 	mapping_job->id = job_mapping_idx;
 	user_job.job_id = job_mapping_idx;
 	job_mapping_idx++;
+	mutex_unlock(&mdp_job_mapping_list_mutex);
 	mapping_job->job = handle;
 	mapping_job->node = pf->private_data;
-	list_add_tail(&mapping_job->list_entry, &job_mapping_list);
-	mutex_unlock(&mdp_job_mapping_list_mutex);
 
 	if (copy_to_user((void *)param, &user_job, sizeof(user_job))) {
 		CMDQ_ERR("CMDQ_IOCTL_ASYNC_EXEC copy_to_user failed\n");
 		status = -EFAULT;
+		if (mdp_arm_mapping_job_release(mapping_job) &&
+		    !cmdq_pkt_auto_release_task(handle, true))
+			goto done;
+
+		mdp_release_readback_slots(handle);
+		cmdq_task_destroy(handle);
+		mdp_release_mapping_job_handles(mapping_job);
+		kfree(mapping_job);
 		goto done;
 	}
+
+	INIT_LIST_HEAD(&mapping_job->list_entry);
+	mutex_lock(&mdp_job_mapping_list_mutex);
+	list_add_tail(&mapping_job->list_entry, &job_mapping_list);
+	mutex_unlock(&mdp_job_mapping_list_mutex);
 
 done:
 	CMDQ_TRACE_FORCE_END();
@@ -864,7 +974,6 @@ void mdp_check_pending_task(struct mdp_job_mapping *mapping_job)
 {
 	struct cmdqRecStruct *handle = mapping_job->job;
 	u64 cost = div_u64(sched_clock() - handle->submit, 1000);
-	u32 i;
 
 	if (cost <= MDP_TASK_PAENDING_TIME_MAX)
 		return;
@@ -875,12 +984,15 @@ void mdp_check_pending_task(struct mdp_job_mapping *mapping_job)
 		cost, handle->submit, handle->engineFlag,
 		(u64)handle->caller_pid, handle->caller_name);
 
-	/* call core to wait and release task in work queue */
-	cmdq_pkt_auto_release_task(handle, true);
-
 	list_del(&mapping_job->list_entry);
-	for (i = 0; i < mapping_job->handle_count; i++)
-		mdp_ion_free_handle(mapping_job->handles[i]);
+
+	if (mdp_arm_mapping_job_release(mapping_job) &&
+	    !cmdq_pkt_auto_release_task(handle, true))
+		return;
+
+	mdp_release_readback_slots(handle);
+	cmdq_task_destroy(handle);
+	mdp_release_mapping_job_handles(mapping_job);
 	kfree(mapping_job);
 }
 #endif
@@ -890,7 +1002,7 @@ s32 mdp_ioctl_async_wait(unsigned long param)
 	struct mdp_wait job_result;
 	struct cmdqRecStruct *handle = NULL;
 	/* backup value after task release */
-	s32 status, i;
+	s32 status;
 	u64 exec_cost = sched_clock();
 	struct mdp_job_mapping *mapping_job = NULL, *tmp = NULL;
 
@@ -956,25 +1068,14 @@ s32 mdp_ioctl_async_wait(unsigned long param)
 
 		/* copy read result to user space */
 		status = mdp_process_read_request(&job_result.read_result);
-		mutex_lock(&rb_slot_list_mutex);
-		/* reference count for slot */
-		for (i = 0; i < ARRAY_SIZE(handle->slot_ids); i++) {
-			if (handle->slot_ids[i] != -1) {
-				rb_slot[handle->slot_ids[i]].ref_cnt--;
-				CMDQ_MSG("slot id %d, count-- by read > %d\n", handle->slot_ids[i],
-					rb_slot[handle->slot_ids[i]].ref_cnt);
-			}
-		}
-		mutex_unlock(&rb_slot_list_mutex);
 	} while (0);
+	mdp_release_readback_slots(handle);
 	exec_cost = div_u64(sched_clock() - exec_cost, 1000);
 	if (exec_cost > 150000)
 		CMDQ_LOG("[warn]job wait and close cost:%lluus handle:0x%p\n",
 			exec_cost, handle);
 
-	for (i = 0; i < mapping_job->handle_count; i++)
-		mdp_ion_free_handle(mapping_job->handles[i]);
-
+	mdp_release_mapping_job_handles(mapping_job);
 	kfree(mapping_job);
 	CMDQ_SYSTRACE_BEGIN("%s destroy\n", __func__);
 	/* task now can release */
@@ -1267,11 +1368,14 @@ s32 mdp_ioctl_simulate(unsigned long param)
 	CMDQ_LOG("%s done\n", __func__);
 
 done:
+	mdp_release_mapping_job_handles(mapping_job);
 	kfree(mapping_job);
 	kfree(cmd_buf.va_base);
 	vfree(result_buffer);
-	if (handle)
+	if (handle) {
+		mdp_release_readback_slots(handle);
 		cmdq_task_destroy(handle);
+	}
 	return status;
 #endif
 }
@@ -1279,7 +1383,6 @@ done:
 
 void mdp_ioctl_free_job_by_node(void *node)
 {
-	uint32_t i;
 	struct mdp_job_mapping *mapping_job = NULL, *tmp = NULL;
 
 	/* verify job handle */
@@ -1293,8 +1396,10 @@ void mdp_ioctl_free_job_by_node(void *node)
 			__func__, mapping_job->job);
 
 		list_del(&mapping_job->list_entry);
-		for (i = 0; i < mapping_job->handle_count; i++)
-			mdp_ion_free_handle(mapping_job->handles[i]);
+		if (mdp_arm_mapping_job_release(mapping_job))
+			continue;
+
+		mdp_release_mapping_job_handles(mapping_job);
 		kfree(mapping_job);
 	}
 	mutex_unlock(&mdp_job_mapping_list_mutex);
