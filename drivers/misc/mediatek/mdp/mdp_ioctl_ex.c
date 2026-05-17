@@ -237,17 +237,30 @@ static void mdp_release_readback_slots(struct cmdqRecStruct *handle)
 	mutex_unlock(&rb_slot_list_mutex);
 }
 
-static void mdp_release_mapping_job_async(u64 user_data)
+static s32 mdp_release_mapping_job_async(unsigned long user_data)
 {
 	struct mdp_job_mapping *mapping_job =
 		(struct mdp_job_mapping *)(unsigned long)user_data;
 
 	if (!mapping_job)
-		return;
+		return 0;
 
 	mdp_release_readback_slots(mapping_job->job);
 	mdp_release_mapping_job_handles(mapping_job);
+#ifndef CONFIG_MTK_CMDQ_MBOX_EXT
+	cmdq_task_destroy(mapping_job->job);
+#endif
 	kfree(mapping_job);
+	return 0;
+}
+
+static s32 mdp_schedule_auto_release(struct cmdqRecStruct *handle)
+{
+#ifdef CONFIG_MTK_CMDQ_MBOX_EXT
+	return cmdq_pkt_auto_release_task(handle, true);
+#else
+	return cmdq_pkt_auto_release_task(handle);
+#endif
 }
 
 static bool mdp_arm_mapping_job_release(struct mdp_job_mapping *mapping_job)
@@ -940,7 +953,7 @@ s32 mdp_ioctl_async_exec(struct file *pf, unsigned long param)
 		CMDQ_ERR("CMDQ_IOCTL_ASYNC_EXEC copy_to_user failed\n");
 		status = -EFAULT;
 		if (mdp_arm_mapping_job_release(mapping_job) &&
-		    !cmdq_pkt_auto_release_task(handle, true))
+		    !mdp_schedule_auto_release(handle))
 			goto done;
 
 		mdp_release_readback_slots(handle);
@@ -987,7 +1000,7 @@ void mdp_check_pending_task(struct mdp_job_mapping *mapping_job)
 	list_del(&mapping_job->list_entry);
 
 	if (mdp_arm_mapping_job_release(mapping_job) &&
-	    !cmdq_pkt_auto_release_task(handle, true))
+	    !mdp_schedule_auto_release(handle))
 		return;
 
 	mdp_release_readback_slots(handle);
