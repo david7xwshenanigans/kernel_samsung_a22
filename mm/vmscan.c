@@ -188,6 +188,8 @@ struct scan_control {
 	/* help kswapd make better choices among multiple memcgs */
 	unsigned int memcgs_need_aging:1;
 	unsigned long last_reclaimed;
+	unsigned long file_taken;
+	unsigned long nr_unqueued_dirty;
 	struct reclaim_state reclaim_state;
 #endif
 	/* Incremented by the number of inactive pages that were scanned */
@@ -6374,6 +6376,7 @@ static bool sort_page(struct lruvec *lruvec, struct page *page, struct scan_cont
 		       int tier_idx)
 {
 	bool success;
+	bool dirty, writeback;
 	int gen = page_lru_gen(page);
 	int type = page_is_file_lru(page);
 	int zone = page_zonenum(page);
@@ -6429,9 +6432,17 @@ static bool sort_page(struct lruvec *lruvec, struct page *page, struct scan_cont
 		return true;
 	}
 
+	dirty = PageDirty(page);
+	writeback = PageWriteback(page);
+	if (type == LRU_GEN_FILE && dirty) {
+		sc->file_taken += delta;
+		if (!writeback)
+			sc->nr_unqueued_dirty += delta;
+	}
+
 	/* waiting for writeback */
-	if (PageLocked(page) || PageWriteback(page) ||
-	    (type == LRU_GEN_FILE && PageDirty(page))) {
+	if (PageLocked(page) || writeback ||
+	    (type == LRU_GEN_FILE && dirty)) {
 		gen = page_inc_gen(lruvec, page, true);
 		list_move(&page->lru, &lrugen->lists[gen][type][zone]);
 		return true;
@@ -6542,6 +6553,8 @@ static int scan_pages(struct lruvec *lruvec, struct scan_control *sc,
 	__count_memcg_events(memcg, item, isolated);
 	__count_memcg_events(memcg, PGREFILL, sorted);
 	__count_vm_events(PGSCAN_ANON + type, isolated);
+	if (type == LRU_GEN_FILE)
+		sc->file_taken += isolated;
 
 	/*
 	 * There might not be eligible pages due to reclaim_idx, may_unmap and
@@ -6674,6 +6687,7 @@ static int evict_pages(struct lruvec *lruvec, struct scan_control *sc, int swapp
 		return scanned;
 retry:
 	reclaimed = shrink_page_list(&list, pgdat, sc, TTU_IGNORE_ACCESS, &stat, false);
+	sc->nr_unqueued_dirty += stat.nr_unqueued_dirty;
 	sc->nr_reclaimed += reclaimed;
 
 	list_for_each_entry_safe_reverse(page, next, &list, lru) {
@@ -6839,6 +6853,8 @@ static void lru_gen_shrink_lruvec(struct lruvec *lruvec, struct scan_control *sc
 	blk_start_plug(&plug);
 
 	set_mm_walk(lruvec_pgdat(lruvec));
+	sc->file_taken = 0;
+	sc->nr_unqueued_dirty = 0;
 
 	while (true) {
 		int delta;
@@ -6869,6 +6885,9 @@ static void lru_gen_shrink_lruvec(struct lruvec *lruvec, struct scan_control *sc
 
 		cond_resched();
 	}
+
+	if (sc->nr_unqueued_dirty && sc->nr_unqueued_dirty == sc->file_taken)
+		wakeup_flusher_threads(0, WB_REASON_VMSCAN);
 
 	/* see the comment in lru_gen_age_node() */
 	if (sc->nr_reclaimed - reclaimed >= MIN_LRU_BATCH && !need_aging)
