@@ -111,10 +111,6 @@ static inline void move_pages_to_lru(struct lruvec *lruvec, struct list_head *li
 #define cgroup_reclaim(sc) (!global_reclaim(sc))
 #endif
 
-#ifndef skip_cma
-#define skip_cma(page, sc) false
-#endif
-
 #ifndef set_task_reclaim_state
 #define set_task_reclaim_state(task, state) ((task)->reclaim_state = (state))
 #endif
@@ -213,6 +209,7 @@ struct scan_control {
 static void lru_gen_age_node(struct pglist_data *pgdat, struct scan_control *sc);
 static void lru_gen_shrink_lruvec(struct lruvec *lruvec, struct scan_control *sc);
 #endif
+static bool skip_cma(struct page *page, struct scan_control *sc);
 
 #ifdef ARCH_HAS_PREFETCH
 #define prefetch_prev_lru_page(_page, _base, _field)			\
@@ -1731,7 +1728,8 @@ static unsigned long isolate_lru_pages(unsigned long nr_to_scan,
 
 		VM_BUG_ON_PAGE(!PageLRU(page), page);
 
-		if (page_zonenum(page) > sc->reclaim_idx) {
+		if (page_zonenum(page) > sc->reclaim_idx ||
+		    skip_cma(page, sc)) {
 			list_move(&page->lru, &pages_skipped);
 			nr_skipped[page_zonenum(page)]++;
 			continue;
@@ -1942,6 +1940,25 @@ static int current_may_throttle(void)
 		current->backing_dev_info == NULL ||
 		bdi_write_congested(current->backing_dev_info);
 }
+
+#ifdef CONFIG_CMA
+/*
+ * It is waste of effort to scan and reclaim CMA pages if they are not
+ * available for the current allocation context. Kswapd cannot be enrolled
+ * as it uses GFP_KERNEL in the reclaim path.
+ */
+static bool skip_cma(struct page *page, struct scan_control *sc)
+{
+	return !current_is_kswapd() &&
+	       gfpflags_to_migratetype(sc->gfp_mask) != MIGRATE_MOVABLE &&
+	       get_pageblock_migratetype(page) == MIGRATE_CMA;
+}
+#else
+static bool skip_cma(struct page *page, struct scan_control *sc)
+{
+	return false;
+}
+#endif
 
 /*
  * shrink_inactive_list() is a helper for shrink_node().  It returns the number
