@@ -598,24 +598,11 @@ unsigned long kbase_mem_evictable_reclaim_count_objects(struct shrinker *s,
 		struct shrink_control *sc)
 {
 	struct kbase_context *kctx;
-	struct kbase_mem_phy_alloc *alloc;
-	unsigned long pages = 0;
 
 	kctx = container_of(s, struct kbase_context, reclaim);
-/**
- * [GPUCORE-27200] WA for scheduling while atomic avoidance
- * return 0 while callback is called with GFP_ATOMIC
- */
-	if (sc->gfp_mask & __GFP_ATOMIC)
-		return 0;
 
-	mutex_lock(&kctx->jit_evict_lock);
-
-	list_for_each_entry(alloc, &kctx->evict_list, evict_node)
-		pages += alloc->nents;
-
-	mutex_unlock(&kctx->jit_evict_lock);
-	return pages;
+	/* VENDOR FIX: track evictable JIT pages without walking evict_list. */
+	return atomic_read(&kctx->evict_nents);
 }
 
 /**
@@ -673,6 +660,8 @@ unsigned long kbase_mem_evictable_reclaim_scan_objects(struct shrinker *s,
 
 		kbase_free_phy_pages_helper(alloc, alloc->evicted);
 		freed += alloc->evicted;
+		WARN_ON(atomic_sub_return(alloc->evicted,
+					&kctx->evict_nents) < 0);
 		list_del_init(&alloc->evict_node);
 
 		/*
@@ -706,6 +695,7 @@ int kbase_mem_evictable_init(struct kbase_context *kctx)
 {
 	INIT_LIST_HEAD(&kctx->evict_list);
 	mutex_init(&kctx->jit_evict_lock);
+	atomic_set(&kctx->evict_nents, 0);
 
 	/* Register shrinker */
 #if LINUX_VERSION_CODE < KERNEL_VERSION(3, 12, 0)
@@ -796,6 +786,7 @@ int kbase_mem_evictable_make(struct kbase_mem_phy_alloc *gpu_alloc)
 	 * can reclaim it.
 	 */
 	list_add(&gpu_alloc->evict_node, &kctx->evict_list);
+	atomic_add(gpu_alloc->nents, &kctx->evict_nents);
 	mutex_unlock(&kctx->jit_evict_lock);
 	kbase_mem_evictable_mark_reclaim(gpu_alloc);
 
@@ -815,6 +806,8 @@ bool kbase_mem_evictable_unmake(struct kbase_mem_phy_alloc *gpu_alloc)
 	 * First remove the allocation from the eviction list as it's no
 	 * longer eligible for eviction.
 	 */
+	WARN_ON(atomic_sub_return(gpu_alloc->nents,
+				&kctx->evict_nents) < 0);
 	list_del_init(&gpu_alloc->evict_node);
 	mutex_unlock(&kctx->jit_evict_lock);
 

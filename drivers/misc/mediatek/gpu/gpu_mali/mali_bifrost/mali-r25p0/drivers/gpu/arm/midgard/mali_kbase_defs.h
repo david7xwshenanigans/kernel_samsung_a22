@@ -1681,6 +1681,7 @@ struct kbase_context {
 
 	struct shrinker         reclaim;
 	struct list_head        evict_list;
+	atomic_t evict_nents;
 
 	struct list_head waiting_soft_jobs;
 	spinlock_t waiting_soft_jobs_lock;

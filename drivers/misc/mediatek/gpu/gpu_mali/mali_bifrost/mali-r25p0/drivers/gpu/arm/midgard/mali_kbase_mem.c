@@ -4138,6 +4138,7 @@ void kbase_jit_free(struct kbase_context *kctx, struct kbase_va_region *reg)
 	/* This allocation can't already be on a list. */
 	WARN_ON(!list_empty(&reg->gpu_alloc->evict_node));
 	list_add(&reg->gpu_alloc->evict_node, &kctx->evict_list);
+	atomic_add(reg->gpu_alloc->nents, &kctx->evict_nents);
 
 	list_move(&reg->jit_node, &kctx->jit_pool_head);
 
