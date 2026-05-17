@@ -7627,6 +7627,7 @@ bool has_unmovable_pages(struct zone *zone, struct page *page, int count,
 			 bool skip_hwpoisoned_pages)
 {
 	unsigned long pfn, iter, found;
+	unsigned long offset;
 	int mt;
 
 	/*
@@ -7640,7 +7641,8 @@ bool has_unmovable_pages(struct zone *zone, struct page *page, int count,
 		return false;
 
 	pfn = page_to_pfn(page);
-	for (found = 0, iter = 0; iter < pageblock_nr_pages; iter++) {
+	offset = pfn % pageblock_nr_pages;
+	for (found = 0, iter = 0; iter < pageblock_nr_pages - offset; iter++) {
 		unsigned long check = pfn + iter;
 
 		if (!pfn_valid_within(check))
