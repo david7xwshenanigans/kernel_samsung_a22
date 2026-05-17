@@ -6338,6 +6338,7 @@ void lru_gen_look_around(struct page_vma_mapped_walk *pvmw)
 	if (!walk && bitmap_weight(bitmap, MIN_LRU_BATCH) < PAGEVEC_SIZE) {
 		for_each_set_bit(i, bitmap, MIN_LRU_BATCH) {
 			page = pte_page(pte[i]);
+			page_clear_lru_refs(page);
 			activate_page(page);
 		}
 		return;
@@ -6478,7 +6479,7 @@ static bool isolate_page(struct lruvec *lruvec, struct page *page, struct scan_c
 
 	/* see the comment on MAX_NR_TIERS */
 	if (!PageReferenced(page))
-		set_mask_bits(&page->flags, LRU_REFS_MASK | LRU_REFS_FLAGS, 0);
+		page_clear_lru_refs(page);
 
 	/* for shrink_page_list() */
 	ClearPageReclaim(page);
