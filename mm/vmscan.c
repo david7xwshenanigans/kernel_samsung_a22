@@ -6074,6 +6074,8 @@ static bool try_to_inc_max_seq(struct lruvec *lruvec, unsigned long max_seq,
 		success = iterate_mm_list(lruvec, walk, &mm);
 		if (mm)
 			walk_mm(lruvec, mm, walk);
+
+		cond_resched();
 	} while (mm);
 done:
 	if (success)
