@@ -16,6 +16,7 @@
 #endif
 #include <linux/sched/clock.h>
 #include <linux/mailbox_controller.h>
+#include <linux/slab.h>
 #ifdef CMDQ_DAPC_DEBUG
 #include <devapc_public.h>
 #endif
@@ -1758,6 +1759,40 @@ static void mdp_pool_free_impl(struct dma_pool *pool, void *va,
 
 	dma_pool_free(pool, va, pa);
 	atomic_dec(cnt);
+}
+
+static void mdp_pool_prewarm(struct dma_pool *pool, u32 limit)
+{
+	struct mdp_rb_pool_entry {
+		void *va;
+		dma_addr_t pa;
+	};
+	struct mdp_rb_pool_entry *entries;
+	u32 i, warmed = 0;
+
+	if (!pool || !limit)
+		return;
+
+	entries = kcalloc(limit, sizeof(*entries), GFP_KERNEL);
+	if (!entries)
+		return;
+
+	for (i = 0; i < limit; i++) {
+		entries[i].va = dma_pool_alloc(pool, GFP_KERNEL,
+			&entries[i].pa);
+		if (!entries[i].va)
+			break;
+		warmed++;
+	}
+
+	while (warmed) {
+		warmed--;
+		dma_pool_free(pool, entries[warmed].va, entries[warmed].pa);
+	}
+
+	/* VENDOR FIX: keep readback pool growth out of RenderEngine frames. */
+	CMDQ_LOG("prewarm MDP readback pool:%u/%u\n", i, limit);
+	kfree(entries);
 }
 
 void *cmdq_core_alloc_hw_buffer_clt(struct device *dev, size_t size,
@@ -5580,6 +5615,7 @@ void cmdq_core_initialize(void)
 	mdp_rb_pool = dma_pool_create("mdp_rb", cmdq_dev_get(),
 		CMDQ_BUF_ALLOC_SIZE, 0, 0);
 	atomic_set(&mdp_rb_pool_cnt, 0);
+	mdp_pool_prewarm(mdp_rb_pool, mdp_rb_pool_limit);
 }
 EXPORT_SYMBOL(cmdq_core_initialize);
 
