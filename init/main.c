@@ -88,6 +88,7 @@
 #include <linux/io.h>
 #include <linux/cache.h>
 #include <linux/rodata_test.h>
+#include <linux/uaccess.h>
 
 #ifdef CONFIG_SEC_BOOTSTAT
 #include <linux/sec_ext.h>
@@ -1202,10 +1203,15 @@ void __init load_default_modules(void)
 
 static int run_init_process(const char *init_filename)
 {
+	int ret;
+
 	argv_init[0] = init_filename;
-	return do_execve(getname_kernel(init_filename),
+	ret = do_execve(getname_kernel(init_filename),
 		(const char __user *const __user *)argv_init,
 		(const char __user *const __user *)envp_init);
+	if (!ret)
+		set_fs(USER_DS);
+	return ret;
 }
 
 static int try_to_run_init_process(const char *init_filename)
