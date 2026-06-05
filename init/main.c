@@ -1297,8 +1297,8 @@ static int __ref kernel_init(void *unused)
 #ifdef CONFIG_RUSTUH_RKP
 			rkp_deferred_init();
 #endif
-}
 			return 0;
+		}
 		pr_err("Failed to execute %s (error %d)\n",
 		       ramdisk_execute_command, ret);
 	}
