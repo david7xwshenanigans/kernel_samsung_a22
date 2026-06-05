@@ -57,7 +57,7 @@ int mdp_ion_get_mva(struct ion_handle *handle,
 		(unsigned long)&mm_data) < 0) {
 		CMDQ_ERR("%s: get mva failed.%p -%p\n",
 			__func__, g_mdp_ion_client, handle);
-		ion_free(g_mdp_ion_client, handle);
+		/* VENDOR FIX: imported ION handles are released by the caller. */
 		return -1;
 	}
 
