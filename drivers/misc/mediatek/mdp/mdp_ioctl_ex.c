@@ -379,6 +379,7 @@ static unsigned long translate_fd(struct op_meta *meta,
 {
 	struct ion_handle *ion_h = NULL;
 	unsigned long mva = 0;
+	size_t buffer_size;
 	u32 i;
 	u32 port = cmdq_mdp_get_hw_port(meta->engine);
 
@@ -410,11 +411,21 @@ static unsigned long translate_fd(struct op_meta *meta,
 			return 0;
 		}
 	} else {
+		ion_h = mapping_job->handles[i];
 		mva = mapping_job->mvas[i];
 	}
 
-	if (meta->fd_offset >= U32_MAX)
+	if (!ion_h || !ion_h->buffer)
 		return 0;
+
+	buffer_size = ion_h->buffer->size;
+	/* VENDOR FIX: reject offsets outside the imported dma-buf. */
+	if (meta->fd_offset >= buffer_size ||
+		mva > U32_MAX - meta->fd_offset) {
+		CMDQ_ERR("%s invalid fd offset:%u size:%zu mva:%#lx\n",
+			__func__, meta->fd_offset, buffer_size, mva);
+		return 0;
+	}
 
 	mva += meta->fd_offset;
 
