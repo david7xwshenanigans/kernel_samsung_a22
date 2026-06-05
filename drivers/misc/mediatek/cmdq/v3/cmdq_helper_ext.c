@@ -1727,6 +1727,10 @@ static void *mdp_pool_alloc_impl(struct dma_pool *pool,
 	void *va;
 	dma_addr_t pa;
 
+	/* VENDOR FIX: fall back if the readback DMA pool was not created. */
+	if (!pool)
+		return NULL;
+
 	if (atomic_inc_return(cnt) > limit) {
 		/* not use pool, decrease to value before call */
 		atomic_dec(cnt);
