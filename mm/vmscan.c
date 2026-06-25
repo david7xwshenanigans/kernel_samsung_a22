@@ -5811,7 +5811,7 @@ static int walk_pud_range(pud_t *pud, unsigned long addr, unsigned long next,
 	if (pud_present(*pud) && !WARN_ON_ONCE(pud_leaf(*pud)))
 		walk_pmd_range(pud, addr, next, args);
 
-	if (need_resched() || walk->batched >= MAX_LRU_BATCH) {
+	if (need_resched() || walk->batched >= MAX_LRU_BATCH || rwsem_is_contended(&args->mm->mmap_sem)) {
 		walk->next_addr = next;
 		return -EAGAIN;
 	}
