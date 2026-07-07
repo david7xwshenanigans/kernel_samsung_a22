@@ -106,6 +106,7 @@ cond_syscall(compat_sys_mq_getsetattr);
 cond_syscall(sys_mbind);
 cond_syscall(sys_get_mempolicy);
 cond_syscall(sys_set_mempolicy);
+cond_syscall(sys_set_mempolicy_home_node);
 cond_syscall(compat_sys_mbind);
 cond_syscall(compat_sys_get_mempolicy);
 cond_syscall(compat_sys_set_mempolicy);
