@@ -159,17 +159,21 @@ static int gw3x_spi_transfer_raw(struct gf_device *gf_dev, u8 *tx_buf,
 		u8 *rx_buf, u32 len)
 {
 	struct spi_message msg;
-	struct spi_transfer xfer;
+	struct spi_transfer *xfer;
+
+	xfer = kzalloc(sizeof(struct spi_transfer), GFP_KERNEL);
+	if (!xfer)
+		return -ENOMEM;
 
 	spi_message_init(&msg);
-	memset(&xfer, 0, sizeof(struct spi_transfer));
 
-	xfer.tx_buf = tx_buf;
-	xfer.rx_buf = rx_buf;
-	xfer.len = len;
-	spi_message_add_tail(&xfer, &msg);
+	xfer->tx_buf = tx_buf;
+	xfer->rx_buf = rx_buf;
+	xfer->len = len;
+	spi_message_add_tail(xfer, &msg);
 	spi_sync(gf_dev->spi, &msg);
 
+	kfree(xfer);
 	return 0;
 }
 
