@@ -744,7 +744,8 @@ void wdt_arch_reset(char mode)
 	{
 		/* trigger SW reset */
 		pr_info("%s: disable pwrap before wdt reset\n", __func__);
-		pwrap_disable();
+		/* VENDOR FIX: pwrap_disable() hangs the bus during wdt_arch_reset */
+		/* pwrap_disable(); */
 		mt_reg_sync_writel(MTK_WDT_SWRST_KEY, MTK_WDT_SWRST);
 	}
 

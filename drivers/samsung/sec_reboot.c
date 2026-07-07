@@ -74,18 +74,12 @@ static void sec_power_off(void)
 	pr_emerg("%s: waiting for reboot\n", __func__);
 	__inner_flush_dcache_all();
 
-	while (1) {
-		/* wait for power button release */
-		released = pmic_get_register_value_nolock(PMIC_PWRKEY_DEB);
-		if (released) {
-			pr_info("%s: PowerButton was released(%d)\n", __func__, released);
-			mt_power_off();
-		} else {
-		/* if power button is not released, wait and check TA again */
-			pr_info("%s: PowerButton wasn't released(%d)\n", __func__, released);
-		}
-		mdelay(1000);
-	}
+	/* VENDOR FIX: PMIC regmap reads hang with interrupts disabled.
+	 * Skip the power button debounce check and immediately power off.
+	 */
+	pr_info("%s: immediately powering off (bypassing pmic read)\n", __func__);
+	mt_power_off();
+	while (1);
 }
 
 static void sec_reboot(enum reboot_mode reboot_mode, const char *cmd)
