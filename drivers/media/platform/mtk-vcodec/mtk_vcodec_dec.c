@@ -2092,7 +2092,8 @@ static int vb2ops_vdec_buf_prepare(struct vb2_buffer *vb)
 			   &ctx->dev->plat_dev->dev);
 		} else {
 			for (plane = 0; plane < vb->num_planes; plane++) {
-				struct vdec_fb dst_mem;
+				dma_addr_t tmp_dma_addr;
+				size_t tmp_size;
 
 				mtk_v4l2_debug(4, "[%d] Cache sync+", ctx->id);
 
@@ -2112,18 +2113,15 @@ static int vb2ops_vdec_buf_prepare(struct vb2_buffer *vb)
 				dma_buf_unmap_attachment(buf_att,
 					sgt, DMA_TO_DEVICE);
 
-				dst_mem.fb_base[plane].dma_addr =
-					vb2_dma_contig_plane_dma_addr(vb,
-					plane);
-				dst_mem.fb_base[plane].size =
-					ctx->picinfo.fb_sz[plane];
+				tmp_dma_addr = vb2_dma_contig_plane_dma_addr(vb, plane);
+				tmp_size = ctx->picinfo.fb_sz[plane];
 				dma_buf_detach(vb->planes[plane].dbuf, buf_att);
 
 				mtk_v4l2_debug(4,
 				 "[%d] Cache sync- TD for %lx sz=%d dev %p",
 				 ctx->id,
-				 (unsigned long)dst_mem.fb_base[plane].dma_addr,
-				 (unsigned int)dst_mem.fb_base[plane].size,
+				 (unsigned long)tmp_dma_addr,
+				 (unsigned int)tmp_size,
 				 &ctx->dev->plat_dev->dev);
 			}
 		}
@@ -2413,7 +2411,8 @@ static void vb2ops_vdec_buf_finish(struct vb2_buffer *vb)
 		!(mtkbuf->flags & NO_CAHCE_INVALIDATE) &&
 		!(ctx->dec_params.svp_mode)) {
 		for (plane = 0; plane < buf->frame_buffer.num_planes; plane++) {
-			struct vdec_fb dst_mem;
+			dma_addr_t tmp_dma_addr;
+			size_t tmp_size;
 			struct dma_buf_attachment *buf_att;
 			struct sg_table *sgt;
 
@@ -2431,16 +2430,15 @@ static void vb2ops_vdec_buf_finish(struct vb2_buffer *vb)
 				sgt->orig_nents, DMA_FROM_DEVICE);
 			dma_buf_unmap_attachment(buf_att, sgt, DMA_FROM_DEVICE);
 
-			dst_mem.fb_base[plane].dma_addr =
-				vb2_dma_contig_plane_dma_addr(vb, plane);
-			dst_mem.fb_base[plane].size = ctx->picinfo.fb_sz[plane];
+			tmp_dma_addr = vb2_dma_contig_plane_dma_addr(vb, plane);
+			tmp_size = ctx->picinfo.fb_sz[plane];
 			dma_buf_detach(vb->planes[plane].dbuf, buf_att);
 
 			mtk_v4l2_debug(4,
 				"[%d] Cache sync- FD for %lx sz=%d dev %p pfb %p",
 				ctx->id,
-				(unsigned long)dst_mem.fb_base[plane].dma_addr,
-				(unsigned int)dst_mem.fb_base[plane].size,
+				(unsigned long)tmp_dma_addr,
+				(unsigned int)tmp_size,
 				&ctx->dev->plat_dev->dev,
 				&buf->frame_buffer);
 		}
