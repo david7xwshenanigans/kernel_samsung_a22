@@ -183,6 +183,9 @@ static u32 prog_list_length(struct list_head *head)
 	struct bpf_prog_list *pl;
 	u32 cnt = 0;
 
+	if (!head->next)
+		INIT_LIST_HEAD(head);
+
 	list_for_each_entry(pl, head, node) {
 		if (!prog_list_prog(pl))
 			continue;
@@ -251,6 +254,9 @@ static int compute_effective_progs(struct cgroup *cgrp,
 	do {
 		if (cnt > 0 && !(p->bpf.flags[type] & BPF_F_ALLOW_MULTI))
 			continue;
+
+		if (!p->bpf.progs[type].next)
+			INIT_LIST_HEAD(&p->bpf.progs[type]);
 
 		list_for_each_entry(pl, &p->bpf.progs[type], node) {
 			if (!prog_list_prog(pl))
@@ -453,6 +459,9 @@ int __cgroup_bpf_attach(struct cgroup *cgrp,
 	if (!!replace_prog != !!(flags & BPF_F_REPLACE))
 		/* replace_prog implies BPF_F_REPLACE, and vice versa */
 		return -EINVAL;
+
+	if (!progs->next)
+		INIT_LIST_HEAD(progs);
 
 	if (!hierarchy_allows_attach(cgrp, type))
 		return -EPERM;
@@ -731,6 +740,9 @@ int __cgroup_bpf_detach(struct cgroup *cgrp, struct bpf_prog *prog,
 	if (prog && link)
 		/* only one of prog or link can be specified */
 		return -EINVAL;
+
+	if (!progs->next)
+		INIT_LIST_HEAD(progs);
 
 	pl = find_detach_entry(progs, prog, link, flags & BPF_F_ALLOW_MULTI);
 	if (IS_ERR(pl))
