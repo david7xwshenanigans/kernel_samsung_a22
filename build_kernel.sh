@@ -100,6 +100,7 @@ readonly EC_CONFIG=4
 readonly EC_BUILD=5
 readonly EC_POST_COPY=6
 readonly EC_ZIP=7
+readonly EC_PUBLISH=8
 readonly EC_INTERRUPTED=130
 
 # -----------------------------------------------------------------------------
@@ -110,6 +111,7 @@ KEEP_GOING=false
 CREATE_ZIP=false
 JSON_MODE=false        # --json  : emit a machine-readable summary to stdout
 DRY_RUN=false          # --dry-run: validate everything, skip actual make
+SKIP_UPLOAD=false      # --skip-upload: do not publish to the artifact registry
 
 DEFCONFIG="a22_wmk_defconfig"
 JOBS=$(nproc 2>/dev/null || echo 4)
@@ -124,6 +126,8 @@ CLANG_SEARCH_DIRS=(
 BUILD_PHASE="init"
 BUILD_STATUS="unknown"
 declare -A PHASE_RESULTS=()   # phase -> ok|fail|skip
+readonly ALL_PHASES=("preflight" "toolchain" "defconfig" "build" "copy_image" "zip" "publish")
+
 
 # -----------------------------------------------------------------------------
 # ARGUMENT PARSING
@@ -139,6 +143,7 @@ Options:
   -j, --jobs N      Parallel make jobs (default: $(nproc))
       --json        Emit a JSON summary line to stdout on completion/failure
       --dry-run     Validate environment and config; skip compilation
+      --skip-upload Skip uploading the final zip to the artifact registry
   -h, --help        Show this help
 EOF
 }
@@ -150,6 +155,7 @@ while [[ $# -gt 0 ]]; do
         -z|--zip)        CREATE_ZIP=true;  shift ;;
         --json)          JSON_MODE=true;   shift ;;
         --dry-run)       DRY_RUN=true;     shift ;;
+        --skip-upload)   SKIP_UPLOAD=true; shift ;;
         -j|--jobs)
             [[ "${2:-}" =~ ^[0-9]+$ ]] || { echo "ERROR: --jobs requires a number"; exit $EC_BAD_ARGS; }
             JOBS="$2"; shift 2 ;;
@@ -237,9 +243,10 @@ emit_json_summary() {
     # Build phase_results JSON object
     local phases_json="{"
     local first=true
-    for phase in "${!PHASE_RESULTS[@]}"; do
+    for phase in "${ALL_PHASES[@]}"; do
+        local res="${PHASE_RESULTS[$phase]:-pending}"
         [[ "$first" == true ]] || phases_json+=","
-        phases_json+="\"$(_json_value "$phase")\":\"$(_json_value "${PHASE_RESULTS[$phase]}")\"" 
+        phases_json+="\"$(_json_value "$phase")\":\"$(_json_value "$res")\"" 
         first=false
     done
     phases_json+="}"
@@ -434,6 +441,7 @@ if command -v ccache &>/dev/null; then
 else
     log_warn "ccache not found — builds will be slower"
 fi
+local_toolchain="$(clang --version | head -n 1)"
 
 phase_ok
 
@@ -584,6 +592,54 @@ else
     fi
 
     log_ok "Flashable zip: $output_zip ($(du -h "$output_zip" | cut -f1))"
+    phase_ok
+fi
+
+# -----------------------------------------------------------------------------
+# PUBLISH ARTIFACT (nightly.zears.xyz)
+# -----------------------------------------------------------------------------
+phase_start "publish"
+
+PUBLISH_SCRIPT="/home/zears/nightly.zears.xyz/scripts/publish.py"
+
+if [[ ! -f "$PUBLISH_SCRIPT" ]]; then
+    log_info "Skipping publish: registry tools not found at $PUBLISH_SCRIPT"
+    phase_skip
+elif [[ "$CREATE_ZIP" == false ]]; then
+    log_info "Skipping publish: no zip created"
+    phase_skip
+elif [[ "$DRY_RUN" == true ]]; then
+    log_info "[dry-run] Skipping publish"
+    phase_skip
+elif [[ "$SKIP_UPLOAD" == true ]]; then
+    log_info "Skipping publish due to --skip-upload"
+    phase_skip
+else
+    log_info "Publishing artifact to registry..."
+    
+    
+    # Capture exact build environment context
+    local_os="$(uname -srm)"
+
+    # Activate the registry python environment and publish
+    if ! (
+        source /home/zears/nightly.zears.xyz/scripts/.venv/bin/activate
+        python /home/zears/nightly.zears.xyz/scripts/publish.py \
+            --file "$output_zip" \
+            --project WMKernel \
+            --component a22 \
+            --channel nightly \
+            --commit "$git_commit" \
+            --branch "$git_branch" \
+            --toolchain "$local_toolchain" \
+            --host-os "$local_os" >> "$BUILD_LOG" 2>&1
+    ); then
+        phase_fail
+        log_error "Failed to publish artifact. See build log for details."
+        exit $EC_PUBLISH
+    fi
+
+    log_ok "Artifact successfully published to nightly.zears.xyz"
     phase_ok
 fi
 
