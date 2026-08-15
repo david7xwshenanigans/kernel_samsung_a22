@@ -564,9 +564,6 @@ void copy_attrs(struct inode *dest, const struct inode *src)
 #ifdef CONFIG_FS_POSIX_ACL
 	dest->i_acl = src->i_acl;
 #endif
-#ifdef CONFIG_SECURITY
-	dest->i_security = src->i_security;
-#endif
 }
 
 static int sdcardfs_permission(struct vfsmount *mnt, struct inode *inode, int mask)
