@@ -82,14 +82,7 @@ void bpf_inode_storage_free(struct inode *inode)
 	 * the map's bucket->list.
 	 */
 	raw_spin_lock_bh(&local_storage->lock);
-	hlist_for_each_entry_safe(selem, n, &local_storage->list, snode) {
-		/* Always unlink from map before unlinking from
-		 * local_storage.
-		 */
-		bpf_selem_unlink_map(selem);
-		free_inode_storage = bpf_selem_unlink_storage_nolock(
-			local_storage, selem, false);
-	}
+	free_inode_storage = bpf_local_storage_unlink_nolock(local_storage);
 	raw_spin_unlock_bh(&local_storage->lock);
 	rcu_read_unlock();
 

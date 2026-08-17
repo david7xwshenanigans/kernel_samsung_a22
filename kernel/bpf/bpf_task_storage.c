@@ -68,14 +68,7 @@ void bpf_task_storage_free(struct task_struct *task)
 	 * the map's bucket->list.
 	 */
 	raw_spin_lock_irqsave(&local_storage->lock, flags);
-	hlist_for_each_entry_safe(selem, n, &local_storage->list, snode) {
-		/* Always unlink from map before unlinking from
-		 * local_storage.
-		 */
-		bpf_selem_unlink_map(selem);
-		free_task_storage = bpf_selem_unlink_storage_nolock(
-			local_storage, selem, false);
-	}
+	free_task_storage = bpf_local_storage_unlink_nolock(local_storage);
 	raw_spin_unlock_irqrestore(&local_storage->lock, flags);
 	rcu_read_unlock();
 

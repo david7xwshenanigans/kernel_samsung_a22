@@ -145,6 +145,21 @@ bool bpf_selem_unlink_storage_nolock(struct bpf_local_storage *local_storage,
 	return free_local_storage;
 }
 
+bool bpf_local_storage_unlink_nolock(struct bpf_local_storage *local_storage)
+{
+	struct bpf_local_storage_elem *selem;
+	bool free_storage = false;
+	struct hlist_node *n;
+
+	hlist_for_each_entry_safe(selem, n, &local_storage->list, snode) {
+		bpf_selem_unlink_map(selem);
+		free_storage = bpf_selem_unlink_storage_nolock(
+			local_storage, selem, false);
+	}
+
+	return free_storage;
+}
+
 static void __bpf_selem_unlink_storage(struct bpf_local_storage_elem *selem)
 {
 	struct bpf_local_storage *local_storage;
