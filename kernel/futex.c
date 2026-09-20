@@ -4210,3 +4210,180 @@ static int __init futex_init(void)
 	return 0;
 }
 core_initcall(futex_init);
+
+#define FUTEXV_WAITER_MASK (FUTEX_32 | FUTEX_PRIVATE_FLAG)
+
+struct futex_vector {
+	struct futex_waitv w;
+	struct futex_q q;
+};
+
+static int unqueue_multiple(struct futex_vector *v, int count)
+{
+	int ret = -1, i;
+	for (i = 0; i < count; i++) {
+		if (!unqueue_me(&v[i].q))
+			ret = i;
+	}
+	return ret;
+}
+
+static int futex_wait_multiple_setup(struct futex_vector *vs, int count, int *woken)
+{
+	struct futex_hash_bucket *hb;
+	bool retry = false;
+	int ret, i;
+	u32 uval;
+
+retry:
+	for (i = 0; i < count; i++) {
+		if ((vs[i].w.flags & FUTEX_PRIVATE_FLAG) && retry)
+			continue;
+		ret = get_futex_key((u32 __user *)(unsigned long)vs[i].w.uaddr,
+				    !(vs[i].w.flags & FUTEX_PRIVATE_FLAG),
+				    &vs[i].q.key, VERIFY_READ);
+		if (unlikely(ret))
+			return ret;
+	}
+
+	set_current_state(TASK_INTERRUPTIBLE);
+
+	for (i = 0; i < count; i++) {
+		u32 __user *uaddr = (u32 __user *)(unsigned long)vs[i].w.uaddr;
+		struct futex_q *q = &vs[i].q;
+		u32 val = (u32)vs[i].w.val;
+
+		hb = queue_lock(q);
+		ret = get_futex_value_locked(&uval, uaddr);
+
+		if (!ret && uval == val) {
+			__queue_me(q, hb);
+			spin_unlock(&hb->lock);
+			continue;
+		}
+
+		queue_unlock(hb);
+		__set_current_state(TASK_RUNNING);
+
+		*woken = unqueue_multiple(vs, i);
+		if (*woken >= 0)
+			return 1;
+
+		if (ret) {
+			if (get_user(uval, uaddr))
+				return -EFAULT;
+			retry = true;
+			goto retry;
+		}
+
+		if (uval != val)
+			return -EWOULDBLOCK;
+	}
+	return 0;
+}
+
+static void futex_sleep_multiple(struct futex_vector *vs, unsigned int count,
+				 struct hrtimer_sleeper *to)
+{
+	if (to && !to->task)
+		return;
+	for (; count; count--, vs++) {
+		if (!READ_ONCE(vs->q.lock_ptr))
+			return;
+	}
+	freezable_schedule();
+}
+
+static int futex_wait_multiple(struct futex_vector *vs, unsigned int count,
+			       struct hrtimer_sleeper *to)
+{
+	int ret, hint = 0;
+	if (to)
+		hrtimer_start_expires(&to->timer, HRTIMER_MODE_ABS);
+	while (1) {
+		ret = futex_wait_multiple_setup(vs, count, &hint);
+		if (ret) {
+			if (ret > 0)
+				ret = hint;
+			return ret;
+		}
+		futex_sleep_multiple(vs, count, to);
+		__set_current_state(TASK_RUNNING);
+		ret = unqueue_multiple(vs, count);
+		if (ret >= 0)
+			return ret;
+		if (to && !to->task)
+			return -ETIMEDOUT;
+		else if (signal_pending(current))
+			return -ERESTARTSYS;
+	}
+}
+
+static int futex_parse_waitv(struct futex_vector *futexv,
+			     struct futex_waitv __user *uwaitv,
+			     unsigned int nr_futexes)
+{
+	struct futex_waitv aux;
+	unsigned int i;
+	for (i = 0; i < nr_futexes; i++) {
+		if (copy_from_user(&aux, &uwaitv[i], sizeof(aux)))
+			return -EFAULT;
+		if ((aux.flags & ~FUTEXV_WAITER_MASK) || aux.__reserved)
+			return -EINVAL;
+		if (!(aux.flags & FUTEX_32))
+			return -EINVAL;
+		futexv[i].w.flags = aux.flags;
+		futexv[i].w.val = aux.val;
+		futexv[i].w.uaddr = aux.uaddr;
+		futexv[i].q = futex_q_init;
+	}
+	return 0;
+}
+
+SYSCALL_DEFINE5(futex_waitv, struct futex_waitv __user *, waiters,
+		unsigned int, nr_futexes, unsigned int, flags,
+		struct __kernel_timespec __user *, timeout, clockid_t, clockid)
+{
+	struct hrtimer_sleeper to;
+	struct futex_vector *futexv;
+	struct timespec64 ts;
+	ktime_t time;
+	int ret;
+
+	if (flags)
+		return -EINVAL;
+
+	if (!nr_futexes || nr_futexes > FUTEX_WAITV_MAX || !waiters)
+		return -EINVAL;
+
+	if (timeout) {
+		if (clockid != CLOCK_REALTIME && clockid != CLOCK_MONOTONIC)
+			return -EINVAL;
+		if (get_timespec64(&ts, timeout))
+			return -EFAULT;
+		time = timespec64_to_ktime(ts);
+		hrtimer_init_on_stack(&to.timer, clockid, HRTIMER_MODE_ABS);
+		hrtimer_init_sleeper(&to, current);
+		hrtimer_set_expires_range_ns(&to.timer, time, current->timer_slack_ns);
+	}
+
+	futexv = kcalloc(nr_futexes, sizeof(*futexv), GFP_KERNEL);
+	if (!futexv) {
+		ret = -ENOMEM;
+		goto destroy_timer;
+	}
+
+	ret = futex_parse_waitv(futexv, waiters, nr_futexes);
+	if (!ret)
+		ret = futex_wait_multiple(futexv, nr_futexes, timeout ? &to : NULL);
+
+	kfree(futexv);
+
+destroy_timer:
+	if (timeout) {
+		hrtimer_cancel(&to.timer);
+		destroy_hrtimer_on_stack(&to.timer);
+	}
+
+	return ret;
+}
