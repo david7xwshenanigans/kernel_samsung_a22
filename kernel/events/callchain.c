@@ -186,6 +186,9 @@ perf_callchain(struct perf_event *event, struct pt_regs *regs)
 	bool crosstask = event->ctx->task && event->ctx->task != current;
 	const u32 max_stack = event->attr.sample_max_stack;
 
+	if (!current->mm)
+		user = false;
+
 	if (!kernel && !user)
 		return NULL;
 
