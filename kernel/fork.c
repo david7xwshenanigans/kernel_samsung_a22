@@ -1855,7 +1855,8 @@ static __latent_entropy struct task_struct *copy_process(
 					struct pid *pid,
 					int trace,
 					unsigned long tls,
-					int node)
+					int node,
+					int io_thread)
 {
 	int pidfd = -1, retval;
 	struct task_struct *p;
@@ -1931,6 +1932,11 @@ static __latent_entropy struct task_struct *copy_process(
 	p = dup_task_struct(current, node);
 	if (!p)
 		goto fork_out;
+
+	if (io_thread) {
+		p->flags |= PF_IO_WORKER;
+		siginitsetinv(&p->blocked, sigmask(SIGKILL) | sigmask(SIGSTOP));
+	}
 
 	cpufreq_task_times_init(p);
 
@@ -2402,7 +2408,7 @@ struct task_struct *fork_idle(int cpu)
 {
 	struct task_struct *task;
 	task = copy_process(CLONE_VM, 0, 0, NULL, NULL, NULL,
-			    &init_struct_pid, 0, 0, cpu_to_node(cpu));
+			    &init_struct_pid, 0, 0, cpu_to_node(cpu), 0);
 	if (!IS_ERR(task)) {
 		init_idle_pids(task);
 		init_idle(task, cpu);
@@ -2448,7 +2454,7 @@ static long _do_fork_pidfd(unsigned long clone_flags,
 	}
 
 	p = copy_process(clone_flags, stack_start, stack_size, parent_tidptr,
-			 child_tidptr, pidfd, NULL, trace, tls, NUMA_NO_NODE);
+			 child_tidptr, pidfd, NULL, trace, tls, NUMA_NO_NODE, 0);
 	add_latent_entropy();
 	/*
 	 * Do this prior waking up the new thread - the thread pointer
@@ -2532,17 +2538,10 @@ struct task_struct *create_io_thread(int (*fn)(void *), void *arg, int node)
 {
 	unsigned long flags = CLONE_FS | CLONE_FILES | CLONE_SIGHAND |
 			      CLONE_THREAD | CLONE_IO;
-	struct task_struct *tsk;
 
-	tsk = copy_process((flags | CLONE_VM | CLONE_UNTRACED) & ~CSIGNAL,
+	return copy_process((flags | CLONE_VM | CLONE_UNTRACED) & ~CSIGNAL,
 			   (unsigned long)fn, (unsigned long)arg, NULL, NULL,
-			   NULL, NULL, 0, 0, node);
-	if (IS_ERR(tsk))
-		return tsk;
-
-	tsk->flags |= PF_IO_WORKER;
-	siginitsetinv(&tsk->blocked, sigmask(SIGKILL) | sigmask(SIGSTOP));
-	return tsk;
+			   NULL, NULL, 0, 0, node, 1);
 }
 
 #ifdef __ARCH_WANT_SYS_FORK

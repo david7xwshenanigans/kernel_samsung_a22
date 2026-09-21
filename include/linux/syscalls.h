@@ -579,6 +579,7 @@ asmlinkage long sys_open(const char __user *filename,
 asmlinkage long sys_openat2(int dfd, const char __user *filename,
 			    struct open_how __user *how, size_t size);
 asmlinkage long sys_close(unsigned int fd);
+int ksys_close(unsigned int fd);
 asmlinkage long sys_close_range(unsigned int fd, unsigned int max_fd,
 				unsigned int flags);
 asmlinkage long sys_access(const char __user *filename, int mode);

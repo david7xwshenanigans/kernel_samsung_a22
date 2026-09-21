@@ -528,7 +528,7 @@ struct mount_attr_local {
 #define BINDER_CURRENT_PROTOCOL_VERSION 8
 
 struct binder_version_local {
-	signed long protocol_version;
+	int32_t protocol_version;
 };
 
 struct binder_write_read_local {
@@ -543,6 +543,31 @@ struct binder_write_read_local {
 #define BINDER_WRITE_READ_LOCAL       _IOWR('b', 1, struct binder_write_read_local)
 #define BINDER_SET_MAX_THREADS_LOCAL  _IOW('b', 5, uint32_t)
 #define BINDER_VERSION_LOCAL          _IOWR('b', 9, struct binder_version_local)
+
+struct binder_freeze_info_local {
+	uint32_t pid;
+	uint32_t enable;
+	uint32_t timeout_ms;
+};
+
+struct binder_frozen_status_info_local {
+	uint32_t pid;
+	uint32_t sync_recv;
+	uint32_t async_recv;
+};
+
+struct binder_extended_error_local {
+	uint32_t id;
+	uint32_t command;
+	int32_t  param;
+};
+
+#define BINDER_FREEZE_LOCAL                   _IOW('b', 14, struct binder_freeze_info_local)
+#define BINDER_GET_FROZEN_INFO_LOCAL          _IOWR('b', 15, struct binder_frozen_status_info_local)
+#define BINDER_ENABLE_ONEWAY_SPAM_DETECTION_LOCAL _IOW('b', 16, uint32_t)
+#define BINDER_GET_EXTENDED_ERROR_LOCAL       _IOWR('b', 17, struct binder_extended_error_local)
+
+#define BR_OK_LOCAL                   _IO('r', 1)
 
 #define BC_ENTER_LOOPER_LOCAL         _IO('c', 12)
 #define BC_EXIT_LOOPER_LOCAL          _IO('c', 13)
