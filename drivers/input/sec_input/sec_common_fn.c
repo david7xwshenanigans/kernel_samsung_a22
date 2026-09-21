@@ -764,9 +764,158 @@ static void sec_input_coord_log(struct device *dev, u8 t_id, int action)
 	}
 }
 
+#if IS_ENABLED(CONFIG_WMK_PATCH_TOUCH_GHOST_FILTER)
+static void sec_ghost_recal_work_fn(struct work_struct *work)
+{
+	struct delayed_work *dwork = to_delayed_work(work);
+	struct sec_ts_plat_data *pdata =
+		container_of(dwork, struct sec_ts_plat_data, ghost_recal_work);
+	struct device *dev;
+
+	if (!pdata || !pdata->input_dev)
+		return;
+
+	dev = pdata->input_dev->dev.parent;
+	if (!dev)
+		return;
+
+	/*
+	 * Re-baseline mutual and self capacitance across all panel nodes.
+	 * Only perform recalibration if the device is enabled, has a registered
+	 * callback, and no fingers are currently touching the glass to avoid
+	 * calibrating out an intentional touch.
+	 */
+	if (pdata->enabled && pdata->touch_count == 0 && pdata->recalibrate) {
+		pdata->recalibrate(dev);
+		pdata->ghost_recal_count++;
+		input_info(true, dev, "%s: unblank baseline recalibration completed\n", __func__);
+	}
+}
+
+/*
+ * Heuristic touch filtering to eliminate moisture, sweat, and condensation ghost touches.
+ * Returns true if the coordinate event should be suppressed from the input subsystem.
+ */
+static bool sec_ghost_filter_process(struct device *dev, int t_id)
+{
+	struct sec_ts_plat_data *pdata = dev->platform_data;
+	int action = pdata->coord[t_id].action;
+	int dx, dy;
+
+	if (!pdata->ghost_filter_enabled)
+		return false;
+
+	if (t_id < 0 || t_id >= SEC_TS_SUPPORT_TOUCH_COUNT)
+		return false;
+
+	if (action == SEC_TS_COORDINATE_ACTION_PRESS) {
+		pdata->ghost_slot[t_id].suppressed = false;
+		pdata->ghost_slot[t_id].confirmed = false;
+		pdata->ghost_slot[t_id].start_x = pdata->coord[t_id].x;
+		pdata->ghost_slot[t_id].start_y = pdata->coord[t_id].y;
+		pdata->ghost_slot[t_id].frame_count = 1;
+
+		/*
+		 * Micro-contact suppression:
+		 * Droplets produce tiny, pin-point capacitance anomalies (major < min_contact_size).
+		 * Hold off dispatching PRESS until confirmed by finger expansion or motion.
+		 */
+		if (pdata->coord[t_id].major < pdata->ghost_min_contact_size) {
+			pdata->ghost_slot[t_id].suppressed = true;
+			return true;
+		}
+
+		/* Normal finger contact footprint: confirm immediately */
+		pdata->ghost_slot[t_id].confirmed = true;
+		pdata->ghost_confirmed_count++;
+		return false;
+	}
+
+	if (action == SEC_TS_COORDINATE_ACTION_MOVE) {
+		if (pdata->ghost_slot[t_id].confirmed)
+			return false;
+
+		if (pdata->ghost_slot[t_id].suppressed) {
+			pdata->ghost_slot[t_id].frame_count++;
+
+			dx = (int)pdata->coord[t_id].x - (int)pdata->ghost_slot[t_id].start_x;
+			dy = (int)pdata->coord[t_id].y - (int)pdata->ghost_slot[t_id].start_y;
+
+			/*
+			 * Check if contact expanded into a real finger or deliberate motion occurred.
+			 */
+			if (pdata->coord[t_id].major >= pdata->ghost_min_contact_size ||
+			    (dx * dx + dy * dy >= (int)pdata->ghost_jitter_threshold * (int)pdata->ghost_jitter_threshold)) {
+				pdata->ghost_slot[t_id].suppressed = false;
+				pdata->ghost_slot[t_id].confirmed = true;
+				pdata->ghost_confirmed_count++;
+
+				/*
+				 * Dispatch initial PRESS that was previously held back,
+				 * then fall through so caller can report this MOVE.
+				 */
+				pdata->coord[t_id].action = SEC_TS_COORDINATE_ACTION_PRESS;
+				sec_input_coord_report(dev, t_id);
+				if ((pdata->touch_count == 1) && !IS_ERR_OR_NULL(&pdata->interrupt_notify_work.work)) {
+					if (pdata->interrupt_notify_work.work.func &&
+					    list_empty(&pdata->interrupt_notify_work.work.entry))
+						schedule_work(&pdata->interrupt_notify_work.work);
+				}
+				sec_input_coord_log(dev, t_id, SEC_TS_COORDINATE_ACTION_PRESS);
+				pdata->coord[t_id].action = SEC_TS_COORDINATE_ACTION_MOVE;
+				return false;
+			}
+
+			/*
+			 * Heightened sensitivity tier for lower screen half:
+			 * Suppress stationary jitter/flutter in this zone.
+			 */
+			if (pdata->coord[t_id].y >= pdata->ghost_lower_bound_y)
+				return true;
+
+			return true;
+		}
+
+		return false;
+	}
+
+	if (action == SEC_TS_COORDINATE_ACTION_RELEASE) {
+		if (pdata->ghost_slot[t_id].suppressed) {
+			/*
+			 * Transient droplet micro-tap neutralized:
+			 * Clean up slot state without reporting phantom release to userspace.
+			 */
+			pdata->ghost_suppressed_count++;
+			pdata->ghost_slot[t_id].suppressed = false;
+			pdata->ghost_slot[t_id].confirmed = false;
+			pdata->ghost_slot[t_id].frame_count = 0;
+
+			pdata->coord[t_id].action = SEC_TS_COORDINATE_ACTION_NONE;
+			pdata->coord[t_id].mcount = 0;
+			pdata->coord[t_id].palm_count = 0;
+			pdata->coord[t_id].noise_level = 0;
+			pdata->coord[t_id].max_strength = 0;
+			pdata->coord[t_id].hover_id_num = 0;
+			return true;
+		}
+
+		pdata->ghost_slot[t_id].confirmed = false;
+		pdata->ghost_slot[t_id].suppressed = false;
+		return false;
+	}
+
+	return false;
+}
+#endif
+
 void sec_input_coord_event(struct device *dev, int t_id)
 {
 	struct sec_ts_plat_data *pdata = dev->platform_data;
+
+#if IS_ENABLED(CONFIG_WMK_PATCH_TOUCH_GHOST_FILTER)
+	if (sec_ghost_filter_process(dev, t_id))
+		return;
+#endif
 
 	if (pdata->coord[t_id].action == SEC_TS_COORDINATE_ACTION_RELEASE) {
 		if (pdata->prev_coord[t_id].action == SEC_TS_COORDINATE_ACTION_NONE
@@ -859,6 +1008,11 @@ void sec_input_release_all_finger(struct device *dev)
 		pdata->coord[i].noise_level = 0;
 		pdata->coord[i].max_strength = 0;
 		pdata->coord[i].hover_id_num = 0;
+#if IS_ENABLED(CONFIG_WMK_PATCH_TOUCH_GHOST_FILTER)
+		pdata->ghost_slot[i].suppressed = false;
+		pdata->ghost_slot[i].confirmed = false;
+		pdata->ghost_slot[i].frame_count = 0;
+#endif
 	}
 
 	input_mt_slot(pdata->input_dev, 0);
@@ -1086,6 +1240,19 @@ int sec_input_device_register(struct device *dev, void *data)
 			return ret;
 		}
 	}
+
+#if IS_ENABLED(CONFIG_WMK_PATCH_TOUCH_GHOST_FILTER)
+	INIT_DELAYED_WORK(&pdata->ghost_recal_work, sec_ghost_recal_work_fn);
+	pdata->ghost_filter_enabled = true;
+	pdata->ghost_recal_on_unblank = true;
+	pdata->ghost_lower_bound_y = 800;
+	pdata->ghost_min_contact_size = 8;
+	pdata->ghost_jitter_threshold = 12;
+	pdata->ghost_suppressed_count = 0;
+	pdata->ghost_confirmed_count = 0;
+	pdata->ghost_recal_count = 0;
+	memset(pdata->ghost_slot, 0, sizeof(pdata->ghost_slot));
+#endif
 
 	return 0;
 }
@@ -1694,6 +1861,9 @@ EXPORT_SYMBOL(stui_tsp_type);
 int sec_input_enable_device(struct input_dev *dev)
 {
 	int retval;
+#if IS_ENABLED(CONFIG_WMK_PATCH_TOUCH_GHOST_FILTER)
+	struct sec_ts_plat_data *pdata = dev->dev.parent->platform_data;
+#endif
 
 	retval = mutex_lock_interruptible(&dev->mutex);
 	if (retval)
@@ -1704,6 +1874,13 @@ int sec_input_enable_device(struct input_dev *dev)
 
 	mutex_unlock(&dev->mutex);
 
+#if IS_ENABLED(CONFIG_WMK_PATCH_TOUCH_GHOST_FILTER)
+	if (retval == 0 && pdata && pdata->ghost_recal_on_unblank && pdata->recalibrate) {
+		cancel_delayed_work(&pdata->ghost_recal_work);
+		schedule_delayed_work(&pdata->ghost_recal_work, msecs_to_jiffies(80));
+	}
+#endif
+
 	return retval;
 }
 EXPORT_SYMBOL(sec_input_enable_device);
@@ -1711,6 +1888,12 @@ EXPORT_SYMBOL(sec_input_enable_device);
 int sec_input_disable_device(struct input_dev *dev)
 {
 	int retval;
+#if IS_ENABLED(CONFIG_WMK_PATCH_TOUCH_GHOST_FILTER)
+	struct sec_ts_plat_data *pdata = dev->dev.parent->platform_data;
+
+	if (pdata)
+		cancel_delayed_work_sync(&pdata->ghost_recal_work);
+#endif
 
 	retval = mutex_lock_interruptible(&dev->mutex);
 	if (retval)
@@ -1782,6 +1965,203 @@ static const struct attribute_group sec_input_attr_group = {
 	.attrs	= sec_input_attrs,
 };
 
+#if IS_ENABLED(CONFIG_WMK_PATCH_TOUCH_GHOST_FILTER)
+static ssize_t sec_ghost_enabled_show(struct device *dev,
+				      struct device_attribute *attr, char *buf)
+{
+	struct input_dev *input_dev = to_input_dev(dev);
+	struct sec_ts_plat_data *pdata = input_dev->dev.parent->platform_data;
+
+	return scnprintf(buf, PAGE_SIZE, "%d\n", pdata->ghost_filter_enabled);
+}
+
+static ssize_t sec_ghost_enabled_store(struct device *dev,
+				       struct device_attribute *attr,
+				       const char *buf, size_t count)
+{
+	struct input_dev *input_dev = to_input_dev(dev);
+	struct sec_ts_plat_data *pdata = input_dev->dev.parent->platform_data;
+	bool enable;
+	int ret;
+
+	ret = strtobool(buf, &enable);
+	if (ret)
+		return ret;
+
+	pdata->ghost_filter_enabled = enable;
+	return count;
+}
+
+static ssize_t sec_ghost_lower_bound_y_show(struct device *dev,
+					    struct device_attribute *attr, char *buf)
+{
+	struct input_dev *input_dev = to_input_dev(dev);
+	struct sec_ts_plat_data *pdata = input_dev->dev.parent->platform_data;
+
+	return scnprintf(buf, PAGE_SIZE, "%u\n", pdata->ghost_lower_bound_y);
+}
+
+static ssize_t sec_ghost_lower_bound_y_store(struct device *dev,
+					     struct device_attribute *attr,
+					     const char *buf, size_t count)
+{
+	struct input_dev *input_dev = to_input_dev(dev);
+	struct sec_ts_plat_data *pdata = input_dev->dev.parent->platform_data;
+	u16 val;
+	int ret;
+
+	ret = kstrtou16(buf, 10, &val);
+	if (ret)
+		return ret;
+
+	pdata->ghost_lower_bound_y = val;
+	return count;
+}
+
+static ssize_t sec_ghost_min_contact_size_show(struct device *dev,
+					       struct device_attribute *attr, char *buf)
+{
+	struct input_dev *input_dev = to_input_dev(dev);
+	struct sec_ts_plat_data *pdata = input_dev->dev.parent->platform_data;
+
+	return scnprintf(buf, PAGE_SIZE, "%u\n", pdata->ghost_min_contact_size);
+}
+
+static ssize_t sec_ghost_min_contact_size_store(struct device *dev,
+						struct device_attribute *attr,
+						const char *buf, size_t count)
+{
+	struct input_dev *input_dev = to_input_dev(dev);
+	struct sec_ts_plat_data *pdata = input_dev->dev.parent->platform_data;
+	u8 val;
+	int ret;
+
+	ret = kstrtou8(buf, 10, &val);
+	if (ret)
+		return ret;
+
+	pdata->ghost_min_contact_size = val;
+	return count;
+}
+
+static ssize_t sec_ghost_jitter_threshold_show(struct device *dev,
+					       struct device_attribute *attr, char *buf)
+{
+	struct input_dev *input_dev = to_input_dev(dev);
+	struct sec_ts_plat_data *pdata = input_dev->dev.parent->platform_data;
+
+	return scnprintf(buf, PAGE_SIZE, "%u\n", pdata->ghost_jitter_threshold);
+}
+
+static ssize_t sec_ghost_jitter_threshold_store(struct device *dev,
+						struct device_attribute *attr,
+						const char *buf, size_t count)
+{
+	struct input_dev *input_dev = to_input_dev(dev);
+	struct sec_ts_plat_data *pdata = input_dev->dev.parent->platform_data;
+	u16 val;
+	int ret;
+
+	ret = kstrtou16(buf, 10, &val);
+	if (ret)
+		return ret;
+
+	pdata->ghost_jitter_threshold = val;
+	return count;
+}
+
+static ssize_t sec_ghost_recal_on_unblank_show(struct device *dev,
+					       struct device_attribute *attr, char *buf)
+{
+	struct input_dev *input_dev = to_input_dev(dev);
+	struct sec_ts_plat_data *pdata = input_dev->dev.parent->platform_data;
+
+	return scnprintf(buf, PAGE_SIZE, "%d\n", pdata->ghost_recal_on_unblank);
+}
+
+static ssize_t sec_ghost_recal_on_unblank_store(struct device *dev,
+						struct device_attribute *attr,
+						const char *buf, size_t count)
+{
+	struct input_dev *input_dev = to_input_dev(dev);
+	struct sec_ts_plat_data *pdata = input_dev->dev.parent->platform_data;
+	bool enable;
+	int ret;
+
+	ret = strtobool(buf, &enable);
+	if (ret)
+		return ret;
+
+	pdata->ghost_recal_on_unblank = enable;
+	return count;
+}
+
+static ssize_t sec_ghost_force_recal_store(struct device *dev,
+					   struct device_attribute *attr,
+					   const char *buf, size_t count)
+{
+	struct input_dev *input_dev = to_input_dev(dev);
+	struct sec_ts_plat_data *pdata = input_dev->dev.parent->platform_data;
+	bool trigger;
+	int ret;
+
+	ret = strtobool(buf, &trigger);
+	if (ret)
+		return ret;
+
+	if (trigger && pdata->recalibrate) {
+		pdata->recalibrate(input_dev->dev.parent);
+		pdata->ghost_recal_count++;
+	}
+
+	return count;
+}
+
+static ssize_t sec_ghost_stats_show(struct device *dev,
+				    struct device_attribute *attr, char *buf)
+{
+	struct input_dev *input_dev = to_input_dev(dev);
+	struct sec_ts_plat_data *pdata = input_dev->dev.parent->platform_data;
+
+	return scnprintf(buf, PAGE_SIZE,
+			 "suppressed_ghosts: %u\nconfirmed_touches: %u\nunblank_recalibrations: %u\n",
+			 pdata->ghost_suppressed_count,
+			 pdata->ghost_confirmed_count,
+			 pdata->ghost_recal_count);
+}
+
+static struct device_attribute dev_attr_ghost_enabled =
+	__ATTR(enabled, 0664, sec_ghost_enabled_show, sec_ghost_enabled_store);
+static struct device_attribute dev_attr_ghost_lower_bound_y =
+	__ATTR(lower_bound_y, 0664, sec_ghost_lower_bound_y_show, sec_ghost_lower_bound_y_store);
+static struct device_attribute dev_attr_ghost_min_contact_size =
+	__ATTR(min_contact_size, 0664, sec_ghost_min_contact_size_show, sec_ghost_min_contact_size_store);
+static struct device_attribute dev_attr_ghost_jitter_threshold =
+	__ATTR(jitter_threshold, 0664, sec_ghost_jitter_threshold_show, sec_ghost_jitter_threshold_store);
+static struct device_attribute dev_attr_ghost_recal_on_unblank =
+	__ATTR(recal_on_unblank, 0664, sec_ghost_recal_on_unblank_show, sec_ghost_recal_on_unblank_store);
+static struct device_attribute dev_attr_ghost_force_recal =
+	__ATTR(force_recal, 0220, NULL, sec_ghost_force_recal_store);
+static struct device_attribute dev_attr_ghost_stats =
+	__ATTR(stats, 0444, sec_ghost_stats_show, NULL);
+
+static struct attribute *sec_ghost_filter_attrs[] = {
+	&dev_attr_ghost_enabled.attr,
+	&dev_attr_ghost_lower_bound_y.attr,
+	&dev_attr_ghost_min_contact_size.attr,
+	&dev_attr_ghost_jitter_threshold.attr,
+	&dev_attr_ghost_recal_on_unblank.attr,
+	&dev_attr_ghost_force_recal.attr,
+	&dev_attr_ghost_stats.attr,
+	NULL
+};
+
+static const struct attribute_group sec_ghost_filter_attr_group = {
+	.name = "ghost_filter",
+	.attrs = sec_ghost_filter_attrs,
+};
+#endif
+
 int sec_input_sysfs_create(struct kobject *kobj)
 {
 	struct kernfs_node *enabled_sd = NULL;
@@ -1794,6 +2174,12 @@ int sec_input_sysfs_create(struct kobject *kobj)
 		if (retval < 0) {
 			pr_err("%s %s: Failed to create sysfs attributes %d\n", SECLOG, __func__, retval);
 		}
+#if IS_ENABLED(CONFIG_WMK_PATCH_TOUCH_GHOST_FILTER)
+		retval = sysfs_create_group(kobj, &sec_ghost_filter_attr_group);
+		if (retval < 0) {
+			pr_err("%s %s: Failed to create ghost filter attributes %d\n", SECLOG, __func__, retval);
+		}
+#endif
 	} else {
 		pr_info("%s %s: 'enabled' is already exist\n", SECLOG, __func__);
 	}
@@ -1804,6 +2190,9 @@ EXPORT_SYMBOL(sec_input_sysfs_create);
 
 void sec_input_sysfs_remove(struct kobject *kobj)
 {
+#if IS_ENABLED(CONFIG_WMK_PATCH_TOUCH_GHOST_FILTER)
+	sysfs_remove_group(kobj, &sec_ghost_filter_attr_group);
+#endif
 	sysfs_remove_group(kobj, &sec_input_attr_group);
 }
 EXPORT_SYMBOL(sec_input_sysfs_remove);

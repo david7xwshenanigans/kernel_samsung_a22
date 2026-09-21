@@ -770,6 +770,28 @@ static int melfas_ts_hw_init(struct i2c_client *client)
 	return ret;
 }
 
+#if IS_ENABLED(CONFIG_WMK_PATCH_TOUCH_GHOST_FILTER)
+static int melfas_ts_recalibrate(struct device *dev)
+{
+	struct i2c_client *client = to_i2c_client(dev);
+	struct melfas_ts_data *ts = i2c_get_clientdata(client);
+	u8 wbuf[2];
+	int ret;
+
+	if (!ts)
+		return -ENODEV;
+
+	input_info(true, dev, "%s: executing baseline recalibration\n", __func__);
+	wbuf[0] = MELFAS_TS_R0_CTRL;
+	wbuf[1] = MELFAS_TS_R1_CTRL_RECALIBRATE;
+	ret = ts->melfas_ts_i2c_write(ts, wbuf, 2, NULL, 0);
+	if (ret < 0)
+		input_err(true, dev, "%s: failed to recalibrate (%d)\n", __func__, ret);
+
+	return ret;
+}
+#endif
+
 static int melfas_ts_init(struct i2c_client *client)
 {
 	struct melfas_ts_data *ts;
@@ -828,6 +850,9 @@ static int melfas_ts_init(struct i2c_client *client)
 	ts->plat_data->init = melfas_ts_reinit;
 	ts->plat_data->lpmode = melfas_ts_set_lowpowermode;
 	ts->plat_data->set_grip_data = melfas_set_grip_data_to_ic;
+#if IS_ENABLED(CONFIG_WMK_PATCH_TOUCH_GHOST_FILTER)
+	ts->plat_data->recalibrate = melfas_ts_recalibrate;
+#endif
 
 	ptsp = &client->dev;
 

@@ -2582,6 +2582,21 @@ static void stm_ts_parse_dt(struct device *dev, struct stm_ts_data *ts)
 	input_info(true, dev, "%s: lpmode_change_delay:%d\n", __func__, ts->lpmode_change_delay);
 }
 
+#if IS_ENABLED(CONFIG_WMK_PATCH_TOUCH_GHOST_FILTER)
+static int stm_ts_recalibrate(struct device *dev)
+{
+	struct stm_ts_data *ts = dev_get_drvdata(dev);
+
+	if (!ts)
+		return -ENODEV;
+
+	input_info(true, dev, "%s: executing baseline recalibration\n", __func__);
+	ts->stm_ts_command(ts, STM_TS_CMD_FORCE_CALIBRATION, true);
+	ts->stm_ts_command(ts, STM_TS_CMD_CLEAR_ALL_EVENT, true);
+	return 0;
+}
+#endif
+
 static int stm_ts_init(struct stm_ts_data *ts)
 {
 	int ret = 0;
@@ -2625,6 +2640,9 @@ static int stm_ts_init(struct stm_ts_data *ts)
 	ts->plat_data->lpmode = stm_ts_set_lowpowermode;
 	ts->plat_data->set_grip_data = stm_set_grip_data_to_ic;
 	ts->plat_data->set_temperature = stm_ts_set_temperature;
+#if IS_ENABLED(CONFIG_WMK_PATCH_TOUCH_GHOST_FILTER)
+	ts->plat_data->recalibrate = stm_ts_recalibrate;
+#endif
 
 	ptsp = &ts->client->dev;
 	g_ts = ts;

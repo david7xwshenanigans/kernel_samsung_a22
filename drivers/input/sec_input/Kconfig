@@ -45,3 +45,14 @@ config SEC_INPUT_CMD_TEST
 	help
 	  TODO: Describe config fully.
 
+config WMK_PATCH_TOUCH_GHOST_FILTER
+	bool "Mitigate moisture and sweat ghost touches via filtering and recalibration"
+	depends on INPUT_SEC_INPUT
+	default y
+	help
+	  Mitigate moisture, sweat, and condensation-induced phantom touches
+	  across the screen on Samsung touchscreen controllers. Provides
+	  full-screen real-time heuristic micro-contact suppression, tiered
+	  stationary flutter debounce for the lower display half, and
+	  stabilized hardware baseline recalibration upon display unblank.
+
