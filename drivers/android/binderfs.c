@@ -588,9 +588,53 @@ out:
 	return dentry;
 }
 
+struct binder_features {
+	bool oneway_spam_detection;
+	bool extended_error;
+};
+
+static struct binder_features binder_features = {
+	.oneway_spam_detection = true,
+	.extended_error = true,
+};
+
+static int binder_features_show(struct seq_file *m, void *unused)
+{
+	bool *feature = m->private;
+
+	seq_printf(m, "%d\n", *feature);
+
+	return 0;
+}
+DEFINE_SHOW_ATTRIBUTE(binder_features);
+
+static int init_binder_features(struct super_block *sb)
+{
+	struct dentry *dentry, *dir;
+
+	dir = binderfs_create_dir(sb->s_root, "features");
+	if (IS_ERR(dir))
+		return PTR_ERR(dir);
+
+	dentry = binderfs_create_file(dir, "oneway_spam_detection",
+				      &binder_features_fops,
+				      &binder_features.oneway_spam_detection);
+	if (IS_ERR(dentry))
+		return PTR_ERR(dentry);
+
+	dentry = binderfs_create_file(dir, "extended_error",
+				      &binder_features_fops,
+				      &binder_features.extended_error);
+	if (IS_ERR(dentry))
+		return PTR_ERR(dentry);
+
+	return 0;
+}
+
 static int init_binder_logs(struct super_block *sb)
 {
 	struct dentry *binder_logs_root_dir, *dentry, *proc_log_dir;
+	const struct binder_debugfs_entry *db_entry;
 	struct binderfs_info *info;
 	int ret = 0;
 
@@ -601,43 +645,15 @@ static int init_binder_logs(struct super_block *sb)
 		goto out;
 	}
 
-	dentry = binderfs_create_file(binder_logs_root_dir, "stats",
-				      &binder_stats_fops, NULL);
-	if (IS_ERR(dentry)) {
-		ret = PTR_ERR(dentry);
-		goto out;
-	}
-
-	dentry = binderfs_create_file(binder_logs_root_dir, "state",
-				      &binder_state_fops, NULL);
-	if (IS_ERR(dentry)) {
-		ret = PTR_ERR(dentry);
-		goto out;
-	}
-
-	dentry = binderfs_create_file(binder_logs_root_dir, "transactions",
-				      &binder_transactions_fops, NULL);
-	if (IS_ERR(dentry)) {
-		ret = PTR_ERR(dentry);
-		goto out;
-	}
-
-	dentry = binderfs_create_file(binder_logs_root_dir,
-				      "transaction_log",
-				      &binder_transaction_log_fops,
-				      &binder_transaction_log);
-	if (IS_ERR(dentry)) {
-		ret = PTR_ERR(dentry);
-		goto out;
-	}
-
-	dentry = binderfs_create_file(binder_logs_root_dir,
-				      "failed_transaction_log",
-				      &binder_transaction_log_fops,
-				      &binder_transaction_log_failed);
-	if (IS_ERR(dentry)) {
-		ret = PTR_ERR(dentry);
-		goto out;
+	binder_for_each_debugfs_entry(db_entry) {
+		dentry = binderfs_create_file(binder_logs_root_dir,
+					      db_entry->name,
+					      db_entry->fops,
+					      db_entry->data);
+		if (IS_ERR(dentry)) {
+			ret = PTR_ERR(dentry);
+			goto out;
+		}
 	}
 
 	proc_log_dir = binderfs_create_dir(binder_logs_root_dir, "proc");
@@ -728,6 +744,10 @@ static int binderfs_fill_super(struct super_block *sb, void *data, int silent)
 		if (*name == ',')
 			name++;
 	}
+
+	ret = init_binder_features(sb);
+	if (ret)
+		return ret;
 
 	if (info->mount_opts.stats_mode == STATS_GLOBAL)
 		return init_binder_logs(sb);
