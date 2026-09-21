@@ -2442,6 +2442,7 @@ extern unsigned long mmap_region(struct file *file, unsigned long addr,
 	unsigned long len, vm_flags_t vm_flags, unsigned long pgoff,
 	struct list_head *uf);
 #define mmap_read_lock(mm)	down_read(&(mm)->mmap_sem)
+#define mmap_read_trylock(mm)	down_read_trylock(&(mm)->mmap_sem)
 #define mmap_read_unlock(mm)	up_read(&(mm)->mmap_sem)
 #define mmap_write_lock(mm)	down_write(&(mm)->mmap_sem)
 #define mmap_write_unlock(mm)	up_write(&(mm)->mmap_sem)
@@ -2585,6 +2586,17 @@ static inline struct vm_area_struct * find_vma_intersection(struct mm_struct * m
 
 	if (vma && end_addr <= vma->vm_start)
 		vma = NULL;
+	return vma;
+}
+
+static inline
+struct vm_area_struct *vma_lookup(struct mm_struct *mm, unsigned long addr)
+{
+	struct vm_area_struct *vma = find_vma(mm, addr);
+
+	if (vma && addr < vma->vm_start)
+		vma = NULL;
+
 	return vma;
 }
 
