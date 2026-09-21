@@ -131,11 +131,25 @@
 #define BPF_CMD_MAP_DELETE_ELEM   3
 #define BPF_CMD_PROG_LOAD         5
 
+#define BPF_MAP_TYPE_HASH         1
+#define BPF_MAP_TYPE_ARRAY        2
 #define BPF_MAP_TYPE_RINGBUF      27
 #define BPF_MAP_TYPE_TASK_STORAGE 29
 #define BPF_MAP_TYPE_BLOOM_FILTER 30
 #define BPF_MAP_TYPE_USER_RINGBUF 31
+#define BPF_PROG_TYPE_SOCKET_FILTER 1
 #define BPF_PROG_TYPE_SYSCALL     31
+
+#define BPF_ANY                   0
+#define BPF_NOEXIST               1
+#define BPF_EXIST                 2
+
+#ifndef SO_ATTACH_BPF
+#define SO_ATTACH_BPF             50
+#endif
+#ifndef SO_DETACH_BPF
+#define SO_DETACH_BPF             27
+#endif
 
 #define BPF_F_NO_PREALLOC         (1U << 0)
 #define BPF_FUNC_ktime_get_coarse_ns 160
