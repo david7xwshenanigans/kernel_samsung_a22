@@ -94,6 +94,7 @@ adb shell "su -c '
     if ! mountpoint -q /tmp 2>/dev/null; then
         mount -t tmpfs -o rw,exec,nosuid,nodev tmpfs /tmp 2>/dev/null || true
     fi
+    rm -f $REMOTE_TMP
     cp $REMOTE_STAGE $REMOTE_TMP
     chmod 755 $REMOTE_TMP
     rm -f $REMOTE_STAGE
