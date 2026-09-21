@@ -343,8 +343,21 @@ struct io_uring_cqe_local {
 #define IORING_OP_NOP          0
 #define IORING_OP_READV        1
 #define IORING_OP_WRITEV       2
+#define IORING_OP_FSYNC        3
+#define IORING_OP_POLL_ADD     6
+#define IORING_OP_POLL_REMOVE  7
+#define IORING_OP_TIMEOUT      11
+#define IORING_OP_TIMEOUT_REMOVE 12
+#define IORING_OP_ASYNC_CANCEL 14
 #define IORING_OP_READ         22
 #define IORING_OP_WRITE        23
+
+#define IORING_ENTER_GETEVENTS (1U << 0)
+
+struct __kernel_timespec_local {
+	int64_t   tv_sec;
+	long long tv_nsec;
+};
 
 #define IORING_REGISTER_BUFFERS      0
 #define IORING_UNREGISTER_BUFFERS    1
