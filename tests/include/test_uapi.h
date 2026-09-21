@@ -521,4 +521,30 @@ struct mount_attr_local {
 #define Q_SYNC     0x800001
 #endif
 
+/* ========================================================================= */
+/* Binder IPC Driver UAPI Definitions                                        */
+/* ========================================================================= */
+
+#define BINDER_CURRENT_PROTOCOL_VERSION 8
+
+struct binder_version_local {
+	signed long protocol_version;
+};
+
+struct binder_write_read_local {
+	uint64_t write_size;
+	uint64_t write_consumed;
+	uint64_t write_buffer;
+	uint64_t read_size;
+	uint64_t read_consumed;
+	uint64_t read_buffer;
+};
+
+#define BINDER_WRITE_READ_LOCAL       _IOWR('b', 1, struct binder_write_read_local)
+#define BINDER_SET_MAX_THREADS_LOCAL  _IOW('b', 5, uint32_t)
+#define BINDER_VERSION_LOCAL          _IOWR('b', 9, struct binder_version_local)
+
+#define BC_ENTER_LOOPER_LOCAL         _IO('c', 12)
+#define BC_EXIT_LOOPER_LOCAL          _IO('c', 13)
+
 #endif /* TEST_UAPI_H */

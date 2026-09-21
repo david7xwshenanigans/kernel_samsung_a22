@@ -9,6 +9,7 @@ void register_suite_syscalls_mem(void);
 void register_suite_syscalls_sync_fs(void);
 void register_suite_procfs_vm(void);
 void register_suite_erofs(void);
+void register_suite_binder(void);
 
 static void print_usage(const char *prog)
 {
@@ -30,6 +31,7 @@ int main(int argc, char **argv)
 	register_suite_syscalls_sync_fs();
 	register_suite_procfs_vm();
 	register_suite_erofs();
+	register_suite_binder();
 
 	const char *target_suite = NULL;
 
