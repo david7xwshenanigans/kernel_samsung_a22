@@ -1281,7 +1281,7 @@ EXPORT_SYMBOL(filp_close);
  * releasing the fd. This ensures that one clone task can't release
  * an fd while another clone is opening it.
  */
-SYSCALL_DEFINE1(close, unsigned int, fd)
+int ksys_close(unsigned int fd)
 {
 	int retval = __close_fd(current->files, fd);
 
@@ -1293,6 +1293,12 @@ SYSCALL_DEFINE1(close, unsigned int, fd)
 		retval = -EINTR;
 
 	return retval;
+}
+EXPORT_SYMBOL(ksys_close);
+
+SYSCALL_DEFINE1(close, unsigned int, fd)
+{
+	return ksys_close(fd);
 }
 EXPORT_SYMBOL(sys_close);
 
