@@ -44,9 +44,9 @@ struct dma_heap_attachment {
 
 #define HIGH_ORDER_GFP (((GFP_HIGHUSER | __GFP_ZERO | __GFP_NOWARN | \
 			  __GFP_NORETRY) & ~__GFP_RECLAIM) | __GFP_COMP)
-#define LOW_ORDER_GFP (GFP_HIGHUSER | __GFP_ZERO | __GFP_COMP)
+#define LOW_ORDER_GFP (GFP_HIGHUSER | __GFP_ZERO | __GFP_RETRY_MAYFAIL)
 
-static gfp_t order_flags[] = { HIGH_ORDER_GFP, LOW_ORDER_GFP, LOW_ORDER_GFP };
+static gfp_t order_flags[] = { HIGH_ORDER_GFP, HIGH_ORDER_GFP, LOW_ORDER_GFP };
 static const unsigned int orders[] = { 8, 4, 0 };
 
 static int dma_heap_map_sgtable(struct device *dev, struct sg_table *table,
@@ -442,6 +442,9 @@ static struct dma_buf *system_heap_allocate(struct dma_heap *heap,
 	struct page *page, *tmp_page;
 	struct dma_buf *dmabuf;
 	int i, ret = -ENOMEM;
+
+	if (len / PAGE_SIZE > totalram_pages)
+		return ERR_PTR(-ENOMEM);
 
 	buffer = kzalloc(sizeof(*buffer), GFP_KERNEL);
 	if (!buffer)
