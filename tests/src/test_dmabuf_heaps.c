@@ -139,7 +139,43 @@ static void test_dmabuf_heaps(void)
 		} else {
 			report_fail(mod, "mmap DMA-BUF fd", "errno=%d (%s)", errno, strerror(errno));
 		}
-		close(dma_buf_fd);
+
+		/* 7. Edge Case: non-zero offset mmap must fail with -EINVAL */
+		void *bad_buf = mmap(NULL, 4096, PROT_READ, MAP_SHARED, dma_buf_fd, 4096);
+		if (bad_buf == MAP_FAILED && errno == EINVAL) {
+			report_pass(mod, "DMA-BUF rejects non-zero offset mmap (-EINVAL)");
+		} else {
+			report_fail(mod, "DMA-BUF non-zero offset mmap", "ptr=%p errno=%d", bad_buf, errno);
+			if (bad_buf != MAP_FAILED) munmap(bad_buf, 4096);
+		}
+
+		/* 8. Edge Case: invalid sync flags rejection (-EINVAL) */
+		struct dma_buf_sync bad_sync = { .flags = 0xDEAD0000U };
+		ret = ioctl(dma_buf_fd, DMA_BUF_IOCTL_SYNC, &bad_sync);
+		if (ret < 0 && errno == EINVAL) {
+			report_pass(mod, "DMA-BUF rejects invalid sync flags (-EINVAL)");
+		} else {
+			report_fail(mod, "DMA-BUF invalid sync flags", "ret=%d errno=%d", ret, errno);
+		}
+
+		/* 9. dup() refcount persistence */
+		int dup_fd = dup(dma_buf_fd);
+		if (dup_fd >= 0) {
+			close(dma_buf_fd);
+			struct dma_buf_sync dup_sync = { .flags = DMA_BUF_SYNC_START | DMA_BUF_SYNC_READ };
+			ret = ioctl(dup_fd, DMA_BUF_IOCTL_SYNC, &dup_sync);
+			if (ret == 0) {
+				report_pass(mod, "DMA-BUF dup() preserves valid handle across close()");
+				dup_sync.flags = DMA_BUF_SYNC_END | DMA_BUF_SYNC_READ;
+				ioctl(dup_fd, DMA_BUF_IOCTL_SYNC, &dup_sync);
+			} else {
+				report_fail(mod, "DMA-BUF dup sync", "ret=%d errno=%d", ret, errno);
+			}
+			close(dup_fd);
+		} else {
+			close(dma_buf_fd);
+			report_fail(mod, "DMA-BUF dup", "errno=%d", errno);
+		}
 	} else {
 		report_fail(mod, "Allocate 4096-byte DMA-BUF buffer", "ioctl failed: %s (errno=%d)", strerror(errno), errno);
 	}

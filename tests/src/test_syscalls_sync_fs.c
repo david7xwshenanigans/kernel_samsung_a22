@@ -110,6 +110,50 @@ static void test_syscall_futex_waitv(void)
 	} else {
 		report_fail(mod, "futex_waitv timeout wait", "ret=%ld errno=%d", ret, errno);
 	}
+
+	/* 10. Multi-waiter array with CLOCK_REALTIME timeout */
+	uint32_t val2 = 0x5678;
+	struct futex_waitv_local multi_waiters[2];
+	memset(multi_waiters, 0, sizeof(multi_waiters));
+	multi_waiters[0].val = futex_val;
+	multi_waiters[0].uaddr = (uintptr_t)&futex_val;
+	multi_waiters[0].flags = FUTEX_32 | FUTEX_PRIVATE_FLAG;
+	multi_waiters[1].val = val2;
+	multi_waiters[1].uaddr = (uintptr_t)&val2;
+	multi_waiters[1].flags = FUTEX_32 | FUTEX_PRIVATE_FLAG;
+
+	struct timespec ts_real;
+	clock_gettime(CLOCK_REALTIME, &ts_real);
+	ts_real.tv_nsec += 10000000;
+	if (ts_real.tv_nsec >= 1000000000) {
+		ts_real.tv_sec += 1;
+		ts_real.tv_nsec -= 1000000000;
+	}
+	ret = syscall(__NR_futex_waitv, multi_waiters, 2, 0, &ts_real, CLOCK_REALTIME);
+	if (ret < 0 && errno == ETIMEDOUT) {
+		report_pass(mod, "futex_waitv multi-waiter timed out on CLOCK_REALTIME (-ETIMEDOUT)");
+	} else {
+		report_fail(mod, "futex_waitv multi-waiter timeout", "ret=%ld errno=%d", ret, errno);
+	}
+
+	/* 11. Unaligned address rejection: futex address must be 4-byte aligned */
+	multi_waiters[1].uaddr = (uintptr_t)&val2 + 1;
+	ret = syscall(__NR_futex_waitv, multi_waiters, 2, 0, NULL, 0);
+	if (ret < 0 && errno == EINVAL) {
+		report_pass(mod, "futex_waitv rejects unaligned uaddr (-EINVAL)");
+	} else {
+		report_fail(mod, "futex_waitv unaligned uaddr", "ret=%ld errno=%d", ret, errno);
+	}
+
+	/* 12. Multi-waiter mismatch on second entry returns -EAGAIN */
+	multi_waiters[1].uaddr = (uintptr_t)&val2;
+	multi_waiters[1].val = val2 + 1; /* Mismatch */
+	ret = syscall(__NR_futex_waitv, multi_waiters, 2, 0, NULL, 0);
+	if (ret < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
+		report_pass(mod, "futex_waitv multi-waiter mismatch on second entry (-EAGAIN)");
+	} else {
+		report_fail(mod, "futex_waitv multi-waiter mismatch", "ret=%ld errno=%d", ret, errno);
+	}
 }
 
 static void test_syscall_landlock(void)

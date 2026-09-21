@@ -131,11 +131,25 @@
 #define BPF_CMD_MAP_DELETE_ELEM   3
 #define BPF_CMD_PROG_LOAD         5
 
+#define BPF_MAP_TYPE_HASH         1
+#define BPF_MAP_TYPE_ARRAY        2
 #define BPF_MAP_TYPE_RINGBUF      27
 #define BPF_MAP_TYPE_TASK_STORAGE 29
 #define BPF_MAP_TYPE_BLOOM_FILTER 30
 #define BPF_MAP_TYPE_USER_RINGBUF 31
+#define BPF_PROG_TYPE_SOCKET_FILTER 1
 #define BPF_PROG_TYPE_SYSCALL     31
+
+#define BPF_ANY                   0
+#define BPF_NOEXIST               1
+#define BPF_EXIST                 2
+
+#ifndef SO_ATTACH_BPF
+#define SO_ATTACH_BPF             50
+#endif
+#ifndef SO_DETACH_BPF
+#define SO_DETACH_BPF             27
+#endif
 
 #define BPF_F_NO_PREALLOC         (1U << 0)
 #define BPF_FUNC_ktime_get_coarse_ns 160
@@ -343,8 +357,21 @@ struct io_uring_cqe_local {
 #define IORING_OP_NOP          0
 #define IORING_OP_READV        1
 #define IORING_OP_WRITEV       2
+#define IORING_OP_FSYNC        3
+#define IORING_OP_POLL_ADD     6
+#define IORING_OP_POLL_REMOVE  7
+#define IORING_OP_TIMEOUT      11
+#define IORING_OP_TIMEOUT_REMOVE 12
+#define IORING_OP_ASYNC_CANCEL 14
 #define IORING_OP_READ         22
 #define IORING_OP_WRITE        23
+
+#define IORING_ENTER_GETEVENTS (1U << 0)
+
+struct __kernel_timespec_local {
+	int64_t   tv_sec;
+	long long tv_nsec;
+};
 
 #define IORING_REGISTER_BUFFERS      0
 #define IORING_UNREGISTER_BUFFERS    1
@@ -493,5 +520,31 @@ struct mount_attr_local {
 #ifndef Q_SYNC
 #define Q_SYNC     0x800001
 #endif
+
+/* ========================================================================= */
+/* Binder IPC Driver UAPI Definitions                                        */
+/* ========================================================================= */
+
+#define BINDER_CURRENT_PROTOCOL_VERSION 8
+
+struct binder_version_local {
+	signed long protocol_version;
+};
+
+struct binder_write_read_local {
+	uint64_t write_size;
+	uint64_t write_consumed;
+	uint64_t write_buffer;
+	uint64_t read_size;
+	uint64_t read_consumed;
+	uint64_t read_buffer;
+};
+
+#define BINDER_WRITE_READ_LOCAL       _IOWR('b', 1, struct binder_write_read_local)
+#define BINDER_SET_MAX_THREADS_LOCAL  _IOW('b', 5, uint32_t)
+#define BINDER_VERSION_LOCAL          _IOWR('b', 9, struct binder_version_local)
+
+#define BC_ENTER_LOOPER_LOCAL         _IO('c', 12)
+#define BC_EXIT_LOOPER_LOCAL          _IO('c', 13)
 
 #endif /* TEST_UAPI_H */
