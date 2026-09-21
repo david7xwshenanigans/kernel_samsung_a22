@@ -777,21 +777,8 @@ struct sec_ts_plat_data {
 #if IS_ENABLED(CONFIG_WMK_PATCH_TOUCH_GHOST_FILTER)
 	int (*recalibrate)(struct device *dev);
 	struct delayed_work ghost_recal_work;
-	bool ghost_filter_enabled;
 	bool ghost_recal_on_unblank;
-	u16 ghost_lower_bound_y;
-	u8 ghost_min_contact_size;
-	u16 ghost_jitter_threshold;
-	u32 ghost_suppressed_count;
-	u32 ghost_confirmed_count;
 	u32 ghost_recal_count;
-	struct sec_ghost_slot_state {
-		bool suppressed;
-		bool confirmed;
-		u16 start_x;
-		u16 start_y;
-		u8 frame_count;
-	} ghost_slot[SEC_TS_SUPPORT_TOUCH_COUNT];
 #endif
 
 	int (*set_charger_mode)(struct device *dev, bool on);
