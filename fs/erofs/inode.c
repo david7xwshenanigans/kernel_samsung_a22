@@ -123,6 +123,9 @@ static struct page *erofs_read_inode(struct inode *inode,
 		/* total blocks for compressed files */
 		if (erofs_inode_is_data_compressed(vi->datalayout))
 			nblks = le32_to_cpu(die->i_u.compressed_blocks);
+		else if (vi->datalayout == EROFS_INODE_CHUNK_BASED)
+			/* fill chunked inode summary info */
+			vi->chunkformat = le16_to_cpu(die->i_u.c.format);
 
 		kfree(copied);
 		break;
@@ -161,6 +164,8 @@ static struct page *erofs_read_inode(struct inode *inode,
 		inode->i_size = le32_to_cpu(dic->i_size);
 		if (erofs_inode_is_data_compressed(vi->datalayout))
 			nblks = le32_to_cpu(dic->i_u.compressed_blocks);
+		else if (vi->datalayout == EROFS_INODE_CHUNK_BASED)
+			vi->chunkformat = le16_to_cpu(dic->i_u.c.format);
 		break;
 	default:
 		erofs_err(inode->i_sb,
@@ -168,6 +173,18 @@ static struct page *erofs_read_inode(struct inode *inode,
 			  erofs_inode_version(ifmt), vi->nid);
 		err = -EOPNOTSUPP;
 		goto err_out;
+	}
+
+	if (vi->datalayout == EROFS_INODE_CHUNK_BASED) {
+		if (vi->chunkformat & ~EROFS_CHUNK_FORMAT_ALL) {
+			erofs_err(inode->i_sb,
+				  "unsupported chunk format %x of nid %llu",
+				  vi->chunkformat, vi->nid);
+			err = -EOPNOTSUPP;
+			goto err_out;
+		}
+		vi->chunkbits = LOG_BLOCK_SIZE +
+			(vi->chunkformat & EROFS_CHUNK_FORMAT_BLKBITS_MASK);
 	}
 
 	inode->i_mtime.tv_sec = inode->i_ctime.tv_sec;
