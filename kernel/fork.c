@@ -1933,11 +1933,6 @@ static __latent_entropy struct task_struct *copy_process(
 	if (!p)
 		goto fork_out;
 
-	if (io_thread) {
-		p->flags |= PF_IO_WORKER;
-		siginitsetinv(&p->blocked, sigmask(SIGKILL) | sigmask(SIGSTOP));
-	}
-
 	cpufreq_task_times_init(p);
 
 	/*
@@ -1983,8 +1978,14 @@ static __latent_entropy struct task_struct *copy_process(
 		goto bad_fork_cleanup_count;
 
 	delayacct_tsk_init(p);	/* Must remain after dup_task_struct() */
-	p->flags &= ~(PF_SUPERPRIV | PF_WQ_WORKER | PF_IO_WORKER | PF_IDLE);
+	p->flags &= ~(PF_SUPERPRIV | PF_WQ_WORKER | PF_IDLE);
 	p->flags |= PF_FORKNOEXEC;
+	if (io_thread) {
+		p->flags |= PF_IO_WORKER;
+		siginitsetinv(&p->blocked, sigmask(SIGKILL) | sigmask(SIGSTOP));
+	} else {
+		p->flags &= ~PF_IO_WORKER;
+	}
 	INIT_LIST_HEAD(&p->children);
 	INIT_LIST_HEAD(&p->sibling);
 	rcu_copy_process(p);
