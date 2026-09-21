@@ -328,3 +328,7 @@ susfs4ksu/
 
 # Android crash logs
 tombstones/
+
+# backport testing artifacts
+tests/test_backports_arm64
+tests/test_backports_host
