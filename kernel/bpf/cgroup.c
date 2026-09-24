@@ -278,6 +278,7 @@ static void activate_effective_progs(struct cgroup *cgrp,
 				     enum bpf_attach_type type,
 				     struct bpf_prog_array *old_array)
 {
+	lockdep_assert_held(&cgroup_mutex);
 	old_array = rcu_replace_pointer(cgrp->bpf.effective[type], old_array,
 					lockdep_is_held(&cgroup_mutex));
 	/* free prog array after grace period, since __cgroup_bpf_run_*()
@@ -339,6 +340,7 @@ static int update_effective_progs(struct cgroup *cgrp,
 	struct cgroup_subsys_state *css;
 	int err;
 
+	lockdep_assert_held(&cgroup_mutex);
 	/* allocate and recompute effective prog arrays */
 	css_for_each_descendant_pre(css, &cgrp->self) {
 		struct cgroup *desc = container_of(css, struct cgroup, self);
@@ -449,6 +451,7 @@ int __cgroup_bpf_attach(struct cgroup *cgrp,
 	struct bpf_prog_list *pl;
 	int err;
 
+	lockdep_assert_held(&cgroup_mutex);
 	if (((flags & BPF_F_ALLOW_OVERRIDE) && (flags & BPF_F_ALLOW_MULTI)) ||
 	    ((flags & BPF_F_REPLACE) && !(flags & BPF_F_ALLOW_MULTI)))
 		/* invalid combination */
