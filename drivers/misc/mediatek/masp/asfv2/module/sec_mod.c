@@ -34,6 +34,7 @@
 #include <linux/delay.h>
 #include <linux/kthread.h>
 #include <linux/errno.h>
+#include <linux/err.h>
 #include <linux/cdev.h>
 #include <linux/kdev_t.h>
 #include <linux/platform_device.h>
@@ -192,12 +193,17 @@ static int sec_init(struct platform_device *dev)
 		return ret;
 	}
 
-	sec_class = class_create(THIS_MODULE, SEC_DEV_NAME);
-	if (sec_class == NULL) {
-		pr_notice("[%s] Create class failed(0x%x)\n",
+	sec_class = class_create(THIS_MODULE, "masp_sec");
+	/* VENDOR FIX: class_create returns ERR_PTR, never NULL;
+	 * use distinct name to avoid collision with Samsung sec_class
+	 */
+	if (IS_ERR(sec_class)) {
+		pr_notice("[%s] Create class failed(%ld)\n",
 			  SEC_DEV_NAME,
-			  ret);
-		ret = -1;
+			  PTR_ERR(sec_class));
+		ret = PTR_ERR(sec_class);
+		sec_class = NULL;
+		unregister_chrdev_region(id, 1);
 		return ret;
 	}
 
@@ -209,13 +215,14 @@ static int sec_init(struct platform_device *dev)
 		goto exit;
 
 	sec_device = device_create(sec_class, NULL, id, NULL, SEC_DEV_NAME);
-	if (sec_class == NULL) {
-		pr_notice("[%s] Create device failed(0x%x)\n",
+	/* VENDOR FIX: check device pointer, not class pointer */
+	if (IS_ERR(sec_device)) {
+		pr_notice("[%s] Create device failed(%ld)\n",
 			  SEC_DEV_NAME,
-			  ret);
-		class_destroy(sec_class);
-		ret = -1;
-		return ret;
+			  PTR_ERR(sec_device));
+		sec_device = NULL;
+		ret = -ENODEV;
+		goto exit;
 	}
 
 	sec.id = id;

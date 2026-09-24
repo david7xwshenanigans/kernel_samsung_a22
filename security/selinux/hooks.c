@@ -5298,6 +5298,9 @@ static void selinux_sk_clone_security(const struct sock *sk, struct sock *newsk)
 	struct sk_security_struct *sksec = sk->sk_security;
 	struct sk_security_struct *newsksec = newsk->sk_security;
 
+	if (WARN_ON_ONCE(!sksec || !newsksec))
+		return;
+
 	newsksec->sid = sksec->sid;
 	newsksec->peer_sid = sksec->peer_sid;
 	newsksec->sclass = sksec->sclass;
@@ -5307,13 +5310,19 @@ static void selinux_sk_clone_security(const struct sock *sk, struct sock *newsk)
 
 static void selinux_sk_getsecid(struct sock *sk, u32 *secid)
 {
-	if (!sk)
-		*secid = SECINITSID_ANY_SOCKET;
-	else {
-		struct sk_security_struct *sksec = sk->sk_security;
+	struct sk_security_struct *sksec;
 
-		*secid = sksec->sid;
+	if (!sk) {
+		*secid = SECINITSID_ANY_SOCKET;
+		return;
 	}
+
+	sksec = sk->sk_security;
+	if (WARN_ON_ONCE(!sksec)) {
+		*secid = SECINITSID_UNLABELED;
+		return;
+	}
+	*secid = sksec->sid;
 }
 
 static void selinux_sock_graft(struct sock *sk, struct socket *parent)
@@ -5321,6 +5330,9 @@ static void selinux_sock_graft(struct sock *sk, struct socket *parent)
 	struct inode_security_struct *isec =
 		inode_security_novalidate(SOCK_INODE(parent));
 	struct sk_security_struct *sksec = sk->sk_security;
+
+	if (WARN_ON_ONCE(!sksec))
+		return;
 
 	if (sk->sk_family == PF_INET || sk->sk_family == PF_INET6 ||
 	    sk->sk_family == PF_UNIX)
