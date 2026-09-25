@@ -3909,7 +3909,10 @@ static int sm5714_usbpd_probe(struct i2c_client *i2c,
 	init_waitqueue_head(&pdic_data->suspend_wait);
 
 #if LINUX_VERSION_CODE < KERNEL_VERSION(4, 19, 188)
-	wakeup_source_init(pdic_data->irq_ws, "sm5714_typec");   // 4.19 R
+	/* VENDOR FIX: wakeup_source_init() already adds the source, so
+	 * calling it here added NULL and warned, and would corrupt a live
+	 * source on re-probe. create+add below is the full sequence.
+	 */
 	if (!(pdic_data->irq_ws)) {
 		pdic_data->irq_ws = wakeup_source_create("sm5714_typec"); // 4.19 Q
 		if (pdic_data->irq_ws)

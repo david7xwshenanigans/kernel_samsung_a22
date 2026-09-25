@@ -989,7 +989,10 @@ static int gw3x_probe_common(struct device *dev, struct gf_device *gf_dev)
 
 #if KERNEL_VERSION(4, 19, 188) > LINUX_VERSION_CODE
 	// 4.19 R
-	wakeup_source_init(gf_dev->wake_lock, "gw3x_irq_wake_lock");
+	/* VENDOR FIX: wakeup_source_init() already adds the source, so
+	 * calling it here added NULL and warned, and would corrupt a live
+	 * source on re-probe. create+add below is the full sequence.
+	 */
 	// 4.19 Q
 	if (!(gf_dev->wake_lock)) {
 		gf_dev->wake_lock = wakeup_source_create("gw3x_irq_wake_lock");
@@ -997,7 +1000,7 @@ static int gw3x_probe_common(struct device *dev, struct gf_device *gf_dev)
 			wakeup_source_add(gf_dev->wake_lock);
 	}
 #ifdef ENABLE_SENSORS_FPRINT_SECURE
-	wakeup_source_init(gf_dev->clk_setting->spi_wake_lock, "gw3x_spi_wake_lock");
+	/* VENDOR FIX: same double-add removal for the SPI wake lock. */
 	if (!(gf_dev->clk_setting->spi_wake_lock)) {
 		gf_dev->clk_setting->spi_wake_lock = wakeup_source_create("gw3x_spi_wake_lock");
 		if (gf_dev->clk_setting->spi_wake_lock)
