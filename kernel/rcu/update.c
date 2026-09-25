@@ -164,10 +164,15 @@ static atomic_t rcu_expedited_nesting = ATOMIC_INIT(1);
 bool rcu_gp_is_expedited(void)
 {
 #ifdef CONFIG_WMK_PATCH_RCU_FORCE_NORMAL
-	/* Always use normal (non-expedited) grace periods.
+	/* Always use normal (non-expedited) grace periods, except during
+	 * the early-boot INIT window where the requesting task must drive
+	 * the grace period itself. Forcing normal mode there makes the
+	 * PROVE_RCU self-test in rcu_scheduler_starting() sleep while
+	 * atomic in rest_init (scheduling while atomic -> __schedule_bug).
 	 * Android's init pushes RCU into expedited mode which fires constant
 	 * IPIs across all active CPUs. Force normal mode to save active power. */
-	return false;
+	if (rcu_scheduler_active != RCU_SCHEDULER_INIT)
+		return false;
 #endif
 	return rcu_expedited || atomic_read(&rcu_expedited_nesting) ||
 	       rcu_scheduler_active == RCU_SCHEDULER_INIT;
