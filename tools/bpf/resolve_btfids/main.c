@@ -666,6 +666,13 @@ static int symbols_patch(struct object *obj)
 	return err < 0 ? -1 : 0;
 }
 
+static int libbpf_log(enum libbpf_print_level level, const char *format, va_list args)
+{
+	if (level == LIBBPF_DEBUG && !verbose)
+		return 0;
+	return vfprintf(stderr, format, args);
+}
+
 static const char * const resolve_btfids_usage[] = {
 	"resolve_btfids [<options>] <ELF object>",
 	NULL
@@ -700,6 +707,8 @@ int main(int argc, const char **argv)
 			     PARSE_OPT_STOP_AT_NON_OPTION);
 	if (argc != 1)
 		usage_with_options(resolve_btfids_usage, btfid_options);
+
+	libbpf_set_print(libbpf_log);
 
 	obj.path = argv[0];
 

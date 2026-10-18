@@ -101,7 +101,7 @@ static int btf_parse_hdr(struct btf *btf)
 		return -ENOTSUP;
 	}
 
-	meta_left = btf->data_size - sizeof(*hdr);
+	meta_left = btf->data_size - hdr->hdr_len;
 	if (!meta_left) {
 		pr_debug("BTF has no data\n");
 		return -EINVAL;
@@ -127,7 +127,7 @@ static int btf_parse_hdr(struct btf *btf)
 		return -EINVAL;
 	}
 
-	btf->nohdr_data = btf->hdr + 1;
+	btf->nohdr_data = (char *)btf->hdr + hdr->hdr_len;
 
 	return 0;
 }
