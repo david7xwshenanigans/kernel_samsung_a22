@@ -19,7 +19,7 @@ if [ "${pahole_ver}" -ge "124" ]; then
 fi
 
 if [ "${pahole_ver}" -ge "125" ]; then
-	extra_paholeopt="${extra_paholeopt} --skip_encoding_btf_inconsistent_proto --btf_gen_optimized"
+	extra_paholeopt="${extra_paholeopt} --skip_encoding_btf_inconsistent_proto --btf_gen_optimized --skip_encoding_btf_type_tag --skip_encoding_btf_decl_tag"
 fi
 
 echo ${extra_paholeopt}
