@@ -112,6 +112,9 @@ CREATE_ZIP=false
 JSON_MODE=false        # --json  : emit a machine-readable summary to stdout
 DRY_RUN=false          # --dry-run: validate everything, skip actual make
 SKIP_UPLOAD=false      # --skip-upload: do not publish to the artifact registry
+FORCE_MAKE=false       # --make  : force using GNU make instead of Ninja
+GEN_NINJA=false        # --gen-ninja: force regenerating build.ninja manifest
+USE_CCACHE=true        # --no-ccache: disable ccache compiler wrapper
 
 DEFCONFIG="a22_wmk_defconfig"
 JOBS=$(nproc 2>/dev/null || echo 4)
@@ -137,10 +140,13 @@ usage() {
 Usage: $0 [OPTIONS]
 
 Options:
-  -q, --quiet       Suppress make output (errors still shown)
-  -k, --keep-going  Pass -k to make (continue past first error)
+  -q, --quiet       Suppress make/ninja output (errors still shown)
+  -k, --keep-going  Pass -k to make/ninja (continue past first error)
   -z, --zip         Create a flashable AnyKernel3 zip after a successful build
-  -j, --jobs N      Parallel make jobs (default: $(nproc))
+  -j, --jobs N      Parallel make/ninja jobs (default: $(nproc))
+      --make        Force building with GNU make instead of Ninja
+      --gen-ninja   Force generating/regenerating build.ninja manifest
+      --no-ccache   Disable ccache compiler wrapper
       --json        Emit a JSON summary line to stdout on completion/failure
       --dry-run     Validate environment and config; skip compilation
       --skip-upload Skip uploading the final zip to the artifact registry
@@ -153,6 +159,9 @@ while [[ $# -gt 0 ]]; do
         -q|--quiet)      QUIET_MODE=true;  shift ;;
         -k|--keep-going) KEEP_GOING=true;  shift ;;
         -z|--zip)        CREATE_ZIP=true;  shift ;;
+        --make)          FORCE_MAKE=true;  shift ;;
+        --gen-ninja)     GEN_NINJA=true;   shift ;;
+        --no-ccache)     USE_CCACHE=false; shift ;;
         --json)          JSON_MODE=true;   shift ;;
         --dry-run)       DRY_RUN=true;     shift ;;
         --skip-upload)   SKIP_UPLOAD=true; shift ;;
@@ -169,6 +178,7 @@ done
 # -----------------------------------------------------------------------------
 PREFIX="$(pwd)"
 OUT_DIR="$PREFIX/out"
+NINJA_MANIFEST="$PREFIX/build.ninja"
 LOG_DIR="$PREFIX/logs"
 BUILD_TIMESTAMP="$(date +%Y%m%d_%H%M%S)"
 BUILD_LOG="$LOG_DIR/build_${BUILD_TIMESTAMP}.log"
@@ -350,7 +360,14 @@ check_disk() {
 }
 
 # Required host tools
-for cmd in make zip git ccache; do
+HOST_TOOLS=(make zip git)
+if [[ "$FORCE_MAKE" == false ]]; then
+    HOST_TOOLS+=(ninja)
+fi
+if [[ "$USE_CCACHE" == true ]]; then
+    HOST_TOOLS+=(ccache)
+fi
+for cmd in "${HOST_TOOLS[@]}"; do
     check_cmd "$cmd"
 done
 
@@ -432,14 +449,27 @@ fi
 export PATH="$CLANG_DIR/bin:$PATH"
 export ARCH="$ARCH"
 
-# Compiler wrapper
+# Compiler wrapper and ccache configuration
 CC_CMD="clang"
-if command -v ccache &>/dev/null; then
+HOSTCC_CMD="clang"
+HOSTCXX_CMD="clang++"
+
+if [[ "$USE_CCACHE" == true ]] && command -v ccache &>/dev/null; then
+    export CCACHE_DIR="${CCACHE_DIR:-$HOME/.ccache}"
+    export CCACHE_MAXSIZE="${CCACHE_MAXSIZE:-50G}"
+    export CCACHE_COMPILERCHECK="${CCACHE_COMPILERCHECK:-content}"
+    export CCACHE_SLOPPINESS="${CCACHE_SLOPPINESS:-time_macros,include_file_mtime,file_macro}"
     CC_CMD="ccache clang"
+    HOSTCC_CMD="ccache clang"
+    HOSTCXX_CMD="ccache clang++"
     ccache -z &>/dev/null
-    log_info "ccache: enabled"
+    log_info "ccache: enabled (dir: $CCACHE_DIR, max: $CCACHE_MAXSIZE)"
 else
-    log_warn "ccache not found — builds will be slower"
+    if [[ "$USE_CCACHE" == true ]]; then
+        log_warn "ccache not found — builds will be slower"
+    else
+        log_info "ccache: disabled by flag"
+    fi
 fi
 local_toolchain="$(clang --version | head -n 1)"
 
@@ -452,11 +482,27 @@ phase_start "defconfig"
 
 log_info "defconfig: $DEFCONFIG"
 
+DEFCONFIG_FILE="$PREFIX/arch/arm64/configs/$DEFCONFIG"
+NEED_MAKE_BOOTSTRAP=false
+
+if [[ ! -f "$NINJA_MANIFEST" ]]; then
+    NEED_MAKE_BOOTSTRAP=true
+fi
+
 if [[ "$DRY_RUN" == false ]]; then
-    if ! make -C "$PREFIX" O="$OUT_DIR" ARCH="$ARCH" "$DEFCONFIG" \
-            >> "$BUILD_LOG" 2>&1; then
-        phase_fail
-        exit $EC_CONFIG
+    if [[ "$FORCE_MAKE" == false && "$GEN_NINJA" == false && -f "$NINJA_MANIFEST" && -f "$OUT_DIR/.config" && "$OUT_DIR/.config" -nt "$DEFCONFIG_FILE" ]]; then
+        log_info "defconfig up to date — skipping make defconfig for Ninja build"
+    else
+        if [[ -f "$OUT_DIR/.config" && "$OUT_DIR/.config" -ot "$DEFCONFIG_FILE" ]]; then
+            log_info "Defconfig file changed; will refresh build DAG with GNU make"
+            NEED_MAKE_BOOTSTRAP=true
+        fi
+        log_info "Updating config with make $DEFCONFIG..."
+        if ! make -C "$PREFIX" O="$OUT_DIR" ARCH="$ARCH" "$DEFCONFIG" \
+                >> "$BUILD_LOG" 2>&1; then
+            phase_fail
+            exit $EC_CONFIG
+        fi
     fi
 else
     log_info "[dry-run] Skipping defconfig"
@@ -469,7 +515,10 @@ phase_ok
 # -----------------------------------------------------------------------------
 phase_start "build"
 
-log_info "jobs=$JOBS arch=$ARCH compiler=$CC_CMD keep-going=$KEEP_GOING"
+USE_NINJA=false
+if [[ "$FORCE_MAKE" == false && "$GEN_NINJA" == false && "$NEED_MAKE_BOOTSTRAP" == false && -f "$NINJA_MANIFEST" ]]; then
+    USE_NINJA=true
+fi
 
 MAKE_FLAGS=(
     -j"$JOBS"
@@ -501,29 +550,75 @@ MAKE_FLAGS=(
 if [[ "$DRY_RUN" == true ]]; then
     log_info "[dry-run] Skipping compilation"
     phase_skip
-else
+elif [[ "$USE_NINJA" == true ]]; then
+    log_info "Building with Ninja: jobs=$JOBS keep-going=$KEEP_GOING manifest=$NINJA_MANIFEST"
+    NINJA_CMD=(ninja -f "$NINJA_MANIFEST" -j"$JOBS")
+    [[ "$KEEP_GOING" == true ]] && NINJA_CMD+=(-k 0)
+
     if [[ "$QUIET_MODE" == true ]]; then
-        # Quiet: only errors reach the terminal; everything goes to the log
-        if ! make -C "$PREFIX" "${MAKE_FLAGS[@]}" 2>&1 \
-                | tee -a "$BUILD_LOG" \
-                | grep -E "^(error:|../.*error:|make\[|ld:)" >&2; then
-            # grep exit 1 (no matches) should not abort — only make failure matters
-            true
+        if ! "${NINJA_CMD[@]}" >> "$BUILD_LOG" 2>&1; then
+            phase_fail
+            log_error "Ninja compilation failed. See $BUILD_LOG and $ERROR_LOG"
+            grep -E "(error:|ninja: error|FAILED:)" "$BUILD_LOG" | tail -n 30 >> "$ERROR_LOG" 2>/dev/null || true
+            grep -E "(error:|ninja: error|FAILED:)" "$BUILD_LOG" | tail -n 30 >&2 || true
+            exit $EC_BUILD
         fi
-        # Re-run make to capture the real exit code (tee ate it above)
-        # Better: use a temp file for the exit code
-        make -C "$PREFIX" "${MAKE_FLAGS[@]}" >> "$BUILD_LOG" 2>&1 || {
-            phase_fail
-            log_error "Compilation failed. See $BUILD_LOG and $ERROR_LOG"
-            grep -E "error:" "$BUILD_LOG" >> "$ERROR_LOG" 2>/dev/null || true
-            exit $EC_BUILD
-        }
     else
-        if ! make -C "$PREFIX" "${MAKE_FLAGS[@]}" 2>&1 | tee -a "$BUILD_LOG"; then
+        ninja_status=0
+        "${NINJA_CMD[@]}" 2>&1 | tee -a "$BUILD_LOG" || ninja_status=${PIPESTATUS[0]}
+        if [[ $ninja_status -ne 0 ]]; then
             phase_fail
-            log_error "Compilation failed. See $BUILD_LOG and $ERROR_LOG"
-            grep -E "error:" "$BUILD_LOG" >> "$ERROR_LOG" 2>/dev/null || true
+            log_error "Ninja compilation failed. See $BUILD_LOG and $ERROR_LOG"
+            grep -E "(error:|ninja: error|FAILED:)" "$BUILD_LOG" | tail -n 30 >> "$ERROR_LOG" 2>/dev/null || true
             exit $EC_BUILD
+        fi
+    fi
+
+    phase_ok
+else
+    if [[ "$FORCE_MAKE" == true ]]; then
+        log_info "Building with GNU Make (--make specified): jobs=$JOBS arch=$ARCH compiler=$CC_CMD keep-going=$KEEP_GOING"
+    elif [[ "$GEN_NINJA" == true ]]; then
+        log_info "Building with GNU Make (--gen-ninja specified): jobs=$JOBS arch=$ARCH compiler=$CC_CMD keep-going=$KEEP_GOING"
+    else
+        log_info "No Ninja manifest found ($NINJA_MANIFEST) — bootstrapping build with GNU Make: jobs=$JOBS"
+    fi
+
+    if [[ "$QUIET_MODE" == true ]]; then
+        if ! make -C "$PREFIX" "${MAKE_FLAGS[@]}" >> "$BUILD_LOG" 2>&1; then
+            phase_fail
+            log_error "Make compilation failed. See $BUILD_LOG and $ERROR_LOG"
+            grep -E "(error:|make\[|ld:)" "$BUILD_LOG" | tail -n 30 >> "$ERROR_LOG" 2>/dev/null || true
+            grep -E "(error:|make\[|ld:)" "$BUILD_LOG" | tail -n 30 >&2 || true
+            exit $EC_BUILD
+        fi
+    else
+        make_status=0
+        make -C "$PREFIX" "${MAKE_FLAGS[@]}" 2>&1 | tee -a "$BUILD_LOG" || make_status=${PIPESTATUS[0]}
+        if [[ $make_status -ne 0 ]]; then
+            phase_fail
+            log_error "Make compilation failed. See $BUILD_LOG and $ERROR_LOG"
+            grep -E "(error:|make\[|ld:)" "$BUILD_LOG" | tail -n 30 >> "$ERROR_LOG" 2>/dev/null || true
+            exit $EC_BUILD
+        fi
+    fi
+
+    # After successful Make build, generate/refresh build.ninja if needed
+    if [[ "$FORCE_MAKE" == false || "$GEN_NINJA" == true ]]; then
+        log_section "generate ninja manifest"
+        log_info "Generating $NINJA_MANIFEST from build artifacts..."
+        GEN_NINJA_ARGS=(
+            python3 "$PREFIX/scripts/gen_ninja.py"
+            --out-dir "$OUT_DIR"
+            --output "$NINJA_MANIFEST"
+        )
+        if [[ "$USE_CCACHE" == false ]]; then
+            GEN_NINJA_ARGS+=(--no-ccache)
+        fi
+        if "${GEN_NINJA_ARGS[@]}" >> "$BUILD_LOG" 2>&1; then
+            log_ok "Generated Ninja manifest: $NINJA_MANIFEST ($(du -h "$NINJA_MANIFEST" | cut -f1))"
+        else
+            log_warn "Failed to generate Ninja manifest. Future builds will continue using GNU Make."
         fi
     fi
 
@@ -551,9 +646,12 @@ fi
 # -----------------------------------------------------------------------------
 # CCACHE STATS (informational only)
 # -----------------------------------------------------------------------------
-if command -v ccache &>/dev/null && [[ "$DRY_RUN" == false ]]; then
+if command -v ccache &>/dev/null && [[ "$USE_CCACHE" == true && "$DRY_RUN" == false ]]; then
     log_section "ccache stats"
     ccache -s >> "$BUILD_LOG" 2>&1
+    if [[ "$JSON_MODE" == false ]]; then
+        ccache -s | grep -E "(hits|misses|hit rate|cache size)" || true
+    fi
     log_info "ccache stats written to build log"
 fi
 
