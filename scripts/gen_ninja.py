@@ -645,29 +645,36 @@ class NinjaGenerator:
                 out.write(f"build {t_str}: ar {in_str}\n")
             out.write("\n")
 
-            out.write("# --- Top-level Kernel Archives & Linking Pipeline ---\n")
-            top_builtin_components = [
-                f"{self.out_dir}/arch/arm64/kernel/head.o",
-                f"{self.out_dir}/init/built-in.a",
-                f"{self.out_dir}/usr/built-in.a",
-                f"{self.out_dir}/arch/arm64/kernel/built-in.a",
-                f"{self.out_dir}/arch/arm64/mm/built-in.a",
-                f"{self.out_dir}/kernel/built-in.a",
-                f"{self.out_dir}/certs/built-in.a",
-                f"{self.out_dir}/mm/built-in.a",
-                f"{self.out_dir}/fs/built-in.a",
-                f"{self.out_dir}/ipc/built-in.a",
-                f"{self.out_dir}/security/built-in.a",
-                f"{self.out_dir}/crypto/built-in.a",
-                f"{self.out_dir}/block/built-in.a",
-                f"{self.out_dir}/arch/arm64/lib/built-in.a",
-                f"{self.out_dir}/lib/built-in.a",
-                f"{self.out_dir}/drivers/built-in.a",
-                f"{self.out_dir}/sound/built-in.a",
-                f"{self.out_dir}/firmware/built-in.a",
-                f"{self.out_dir}/net/built-in.a",
-                f"{self.out_dir}/virt/built-in.a",
+            candidate_top_dirs = [
+                "init",
+                "usr",
+                "arch/arm64/kernel",
+                "arch/arm64/mm",
+                "arch/arm64/net",
+                "arch/arm64/crypto",
+                "kernel",
+                "certs",
+                "mm",
+                "fs",
+                "ipc",
+                "security",
+                "crypto",
+                "block",
+                "arch/arm64/lib",
+                "lib",
+                "drivers",
+                "sound",
+                "firmware",
+                "net",
+                "virt",
             ]
+            top_builtin_components = [f"{self.out_dir}/arch/arm64/kernel/head.o"]
+            ar_targets_set = {target for target, _ in self.ar_targets}
+            for d in candidate_top_dirs:
+                a_path = f"{self.out_dir}/{d}/built-in.a"
+                if a_path in ar_targets_set or os.path.exists(a_path):
+                    if a_path not in top_builtin_components:
+                        top_builtin_components.append(a_path)
             top_ar_in = " ".join(top_builtin_components)
             out.write(f"build {self.out_dir}/built-in.a: ar {top_ar_in}\n\n")
 
